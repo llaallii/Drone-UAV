@@ -280,13 +280,13 @@ except Exception:
     pass  # Silent fail if checks can't run
 
 
-# Print helpful info for interactive users
-if __name__ != "__main__":
-    try:
-        # Only show info if in interactive environment
-        import sys
-        if hasattr(sys, 'ps1'):  # Interactive interpreter
-            print_package_info()
-            quick_start_guide()
-    except:
-        pass
+# # Print helpful info for interactive users
+# if __name__ != "__main__":
+#     try:
+#         # Only show info if in interactive environment
+#         import sys
+#         if hasattr(sys, 'ps1'):  # Interactive interpreter
+#             print_package_info()
+#             quick_start_guide()
+#     except:
+#         pass

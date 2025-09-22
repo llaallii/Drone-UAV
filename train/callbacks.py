@@ -17,209 +17,295 @@ except ImportError:
     BaseCallback = object
 
 
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from stable_baselines3.common.callbacks import BaseCallback
+import threading
+import time
+from collections import deque
+
 class LiveVisualizationCallback(BaseCallback):
     """
-    Callback for live training visualization.
-    
-    Shows real-time training progress with:
-    - Episode reward plots
-    - Environment rendering
-    - Training statistics
+    Enhanced live visualization callback for drone training with proper property handling
     """
     
-    def __init__(self, env, render_freq: int = 1000, verbose: int = 0):
+    def __init__(self, 
+                 update_freq=100,
+                 plot_freq=10,
+                 max_history=1000,
+                 enable_3d_plot=True,
+                 enable_reward_plot=True,
+                 enable_state_plot=True,
+                 verbose=0):
         super().__init__(verbose)
-        self.env = env
-        self.render_freq = render_freq
-        self.episode_count = 0
-        self.episode_rewards = []
-        self.episode_lengths = []
+        
+        self.update_freq = update_freq
+        self.plot_freq = plot_freq
+        self.max_history = max_history
+        self.enable_3d_plot = enable_3d_plot
+        self.enable_reward_plot = enable_reward_plot
+        self.enable_state_plot = enable_state_plot
+        
+        # Data storage
+        self.episode_rewards = deque(maxlen=max_history)
+        self.episode_lengths = deque(maxlen=max_history)
+        self.timesteps = deque(maxlen=max_history)
+        self.drone_positions = deque(maxlen=max_history)
+        self.drone_velocities = deque(maxlen=max_history)
+        self.heights = deque(maxlen=max_history)
+        
+        # Current episode tracking
         self.current_episode_reward = 0
         self.current_episode_length = 0
-        self.start_time = time.time()
+        self.episode_count = 0
         
-        # Setup matplotlib for live plotting
-        if matplotlib_available:
-            plt.ion()  # Enable interactive mode
-            self.fig, self.axes = plt.subplots(2, 2, figsize=(12, 8))
-            self.fig.suptitle('Live Training Monitor', fontsize=16)
-            
-            # Setup subplots
-            self.ax_rewards = self.axes[0, 0]
-            self.ax_lengths = self.axes[0, 1] 
-            self.ax_learning = self.axes[1, 0]
-            self.ax_stats = self.axes[1, 1]
-            
-            # Configure plots
-            self._setup_plots()
-            plt.tight_layout()
-            plt.show()
+        # Visualization setup
+        self.fig = None
+        self.axes = {}
+        self.lines = {}
+        self.setup_plots()
+        
+        # Animation and threading
+        self.animation = None
+        self.plot_thread = None
+        self.is_plotting = False
+        
+        # Reference to environment (store internally, don't expose as property)
+        self._env_ref = None
     
-    def _setup_plots(self):
-        """Setup the matplotlib plots."""
-        if not matplotlib_available:
+    def set_training_env(self, env):
+        """Method to set the training environment reference"""
+        self._env_ref = env
+    
+    def setup_plots(self):
+        """Initialize the plotting interface"""
+        if not (self.enable_3d_plot or self.enable_reward_plot or self.enable_state_plot):
             return
             
-        # Episode rewards plot
-        self.ax_rewards.set_title('Episode Rewards')
-        self.ax_rewards.set_xlabel('Episode')
-        self.ax_rewards.set_ylabel('Reward')
-        self.ax_rewards.grid(True, alpha=0.3)
+        # Calculate subplot layout
+        n_plots = sum([self.enable_3d_plot, self.enable_reward_plot, self.enable_state_plot])
         
-        # Episode lengths plot
-        self.ax_lengths.set_title('Episode Lengths')
-        self.ax_lengths.set_xlabel('Episode')
-        self.ax_lengths.set_ylabel('Steps')
-        self.ax_lengths.grid(True, alpha=0.3)
+        if n_plots == 1:
+            fig_size = (8, 6)
+        elif n_plots == 2:
+            fig_size = (12, 6)
+        else:
+            fig_size = (15, 10)
         
-        # Learning progress plot
-        self.ax_learning.set_title('Learning Progress')
-        self.ax_learning.set_xlabel('Training Steps')
-        self.ax_learning.set_ylabel('Metrics')
-        self.ax_learning.grid(True, alpha=0.3)
+        self.fig, axes = plt.subplots(1, n_plots, figsize=fig_size)
+        if n_plots == 1:
+            axes = [axes]
         
-        # Statistics plot (text-based)
-        self.ax_stats.set_title('Training Statistics')
-        self.ax_stats.axis('off')
+        plot_idx = 0
+        
+        # 3D trajectory plot
+        if self.enable_3d_plot:
+            # Remove the 2D axis and add 3D
+            self.fig.delaxes(axes[plot_idx])
+            self.axes['3d'] = self.fig.add_subplot(1, n_plots, plot_idx + 1, projection='3d')
+            self.axes['3d'].set_xlabel('X Position (m)')
+            self.axes['3d'].set_ylabel('Y Position (m)')
+            self.axes['3d'].set_zlabel('Z Position (m)')
+            self.axes['3d'].set_title('Drone 3D Trajectory')
+            
+            self.lines['trajectory'], = self.axes['3d'].plot([], [], [], 'b-', alpha=0.7, linewidth=2)
+            self.lines['current_pos'], = self.axes['3d'].plot([], [], [], 'ro', markersize=8)
+            plot_idx += 1
+        
+        # Reward plot
+        if self.enable_reward_plot:
+            self.axes['reward'] = axes[plot_idx]
+            self.axes['reward'].set_xlabel('Episode')
+            self.axes['reward'].set_ylabel('Total Reward')
+            self.axes['reward'].set_title('Training Progress')
+            self.axes['reward'].grid(True, alpha=0.3)
+            
+            self.lines['reward'], = self.axes['reward'].plot([], [], 'g-', linewidth=2, label='Episode Reward')
+            self.lines['reward_ma'], = self.axes['reward'].plot([], [], 'r-', linewidth=2, label='Moving Average')
+            self.axes['reward'].legend()
+            plot_idx += 1
+        
+        # State monitoring plot
+        if self.enable_state_plot:
+            self.axes['state'] = axes[plot_idx]
+            self.axes['state'].set_xlabel('Time Steps')
+            self.axes['state'].set_ylabel('Values')
+            self.axes['state'].set_title('Drone State Monitoring')
+            self.axes['state'].grid(True, alpha=0.3)
+            
+            self.lines['height'], = self.axes['state'].plot([], [], 'b-', linewidth=2, label='Height (m)')
+            self.lines['speed'], = self.axes['state'].plot([], [], 'r-', linewidth=2, label='Speed (m/s)')
+            self.axes['state'].legend()
+            plot_idx += 1
+        
+        plt.tight_layout()
+        plt.ion()  # Turn on interactive mode
+        plt.show(block=False)
+    
+    def _on_training_start(self) -> None:
+        """Called when training starts"""
+        self.episode_count = 0
+        self.current_episode_reward = 0
+        self.current_episode_length = 0
+        
+        # Start the plotting thread
+        if self.fig is not None and not self.is_plotting:
+            self.is_plotting = True
+            self.plot_thread = threading.Thread(target=self._plot_loop, daemon=True)
+            self.plot_thread.start()
     
     def _on_step(self) -> bool:
-        """Called at each training step."""
+        """Called at each step"""
+        # Get current state from environment
+        if hasattr(self.training_env, 'get_wrapper_attr'):
+            # For vectorized environments
+            try:
+                env = self.training_env.get_wrapper_attr('unwrapped')[0]
+            except:
+                env = self.training_env
+        else:
+            env = self.training_env
+        
+        # Extract drone state if available
+        if hasattr(env, 'data') and hasattr(env.data, 'qpos'):
+            # MuJoCo environment
+            pos = env.data.qpos[0:3].copy()
+            vel = env.data.qvel[0:3].copy()
+            height = pos[2]
+            speed = np.linalg.norm(vel)
+            
+            # Store data
+            self.drone_positions.append(pos)
+            self.drone_velocities.append(vel)
+            self.heights.append(height)
+            self.timesteps.append(self.num_timesteps)
+        
         # Track episode progress
-        if 'rewards' in self.locals:
-            self.current_episode_reward += self.locals['rewards'][0]
         self.current_episode_length += 1
         
-        # Check for episode end
-        if 'dones' in self.locals and self.locals['dones'][0]:
-            self.episode_rewards.append(self.current_episode_reward)
-            self.episode_lengths.append(self.current_episode_length)
-            self.episode_count += 1
-            
-            # Reset episode tracking
-            self.current_episode_reward = 0
-            self.current_episode_length = 0
-            
-            # Update plots
-            if matplotlib_available:
-                self._update_plots()
-        
-        # Render environment
-        if self.num_timesteps % self.render_freq == 0:
-            self._render_environment()
+        # Add reward info if available
+        if hasattr(self.locals, 'rewards') and self.locals['rewards'] is not None:
+            reward = self.locals['rewards'][0] if isinstance(self.locals['rewards'], (list, np.ndarray)) else self.locals['rewards']
+            self.current_episode_reward += reward
         
         return True
     
-    def _render_environment(self):
-        """Render the training environment."""
+    def _on_rollout_end(self) -> None:
+        """Called at the end of each rollout"""
+        # Check if episode ended
+        if hasattr(self.locals, 'dones') and self.locals['dones'] is not None:
+            done = self.locals['dones'][0] if isinstance(self.locals['dones'], (list, np.ndarray)) else self.locals['dones']
+            
+            if done:
+                # Episode finished
+                self.episode_rewards.append(self.current_episode_reward)
+                self.episode_lengths.append(self.current_episode_length)
+                self.episode_count += 1
+                
+                # Reset episode tracking
+                self.current_episode_reward = 0
+                self.current_episode_length = 0
+                
+                if self.verbose > 0 and self.episode_count % 10 == 0:
+                    avg_reward = np.mean(list(self.episode_rewards)[-10:]) if self.episode_rewards else 0
+                    print(f"Episode {self.episode_count}, Avg Reward (last 10): {avg_reward:.2f}")
+    
+    def _plot_loop(self):
+        """Main plotting loop running in separate thread"""
+        while self.is_plotting:
+            try:
+                self.update_plots()
+                time.sleep(1.0 / self.plot_freq)  # Control update frequency
+            except Exception as e:
+                if self.verbose > 0:
+                    print(f"Plot update error: {e}")
+                time.sleep(0.1)
+    
+    def update_plots(self):
+        """Update all active plots"""
+        if self.fig is None:
+            return
+        
         try:
-            # Render the first environment
-            if hasattr(self.env, 'envs') and len(self.env.envs) > 0:
-                self.env.envs[0].render()
-            elif hasattr(self.env, 'render'):
-                self.env.render()
+            # Update 3D trajectory plot
+            if self.enable_3d_plot and len(self.drone_positions) > 0:
+                positions = np.array(list(self.drone_positions))
+                
+                # Update trajectory line
+                self.lines['trajectory'].set_data_3d(positions[:, 0], positions[:, 1], positions[:, 2])
+                
+                # Update current position
+                if len(positions) > 0:
+                    current = positions[-1]
+                    self.lines['current_pos'].set_data_3d([current[0]], [current[1]], [current[2]])
+                
+                # Auto-scale axes
+                if len(positions) > 10:
+                    margin = 1.0
+                    self.axes['3d'].set_xlim(positions[:, 0].min() - margin, positions[:, 0].max() + margin)
+                    self.axes['3d'].set_ylim(positions[:, 1].min() - margin, positions[:, 1].max() + margin)
+                    self.axes['3d'].set_zlim(0, positions[:, 2].max() + margin)
+            
+            # Update reward plot
+            if self.enable_reward_plot and len(self.episode_rewards) > 0:
+                episodes = list(range(1, len(self.episode_rewards) + 1))
+                rewards = list(self.episode_rewards)
+                
+                self.lines['reward'].set_data(episodes, rewards)
+                
+                # Moving average
+                if len(rewards) >= 10:
+                    ma_window = min(20, len(rewards))
+                    moving_avg = []
+                    for i in range(len(rewards)):
+                        start_idx = max(0, i - ma_window + 1)
+                        moving_avg.append(np.mean(rewards[start_idx:i+1]))
+                    self.lines['reward_ma'].set_data(episodes, moving_avg)
+                
+                # Auto-scale
+                self.axes['reward'].relim()
+                self.axes['reward'].autoscale_view()
+            
+            # Update state monitoring plot
+            if self.enable_state_plot and len(self.heights) > 0:
+                recent_steps = min(500, len(self.heights))  # Show last 500 steps
+                time_range = list(range(len(self.heights) - recent_steps, len(self.heights)))
+                
+                heights = list(self.heights)[-recent_steps:]
+                speeds = [np.linalg.norm(vel) for vel in list(self.drone_velocities)[-recent_steps:]]
+                
+                self.lines['height'].set_data(time_range, heights)
+                self.lines['speed'].set_data(time_range, speeds)
+                
+                # Auto-scale
+                self.axes['state'].relim()
+                self.axes['state'].autoscale_view()
+            
+            # Refresh the plot
+            self.fig.canvas.draw()
+            self.fig.canvas.flush_events()
+            
         except Exception as e:
             if self.verbose > 0:
-                print(f"⚠️ Rendering failed: {e}")
+                print(f"Plot rendering error: {e}")
     
-    def _update_plots(self):
-        """Update live training plots."""
-        if not matplotlib_available or len(self.episode_rewards) == 0:
-            return
-            
-        try:
-            # Update episode rewards
-            self.ax_rewards.clear()
-            self.ax_rewards.plot(self.episode_rewards, 'b-', alpha=0.7, label='Episode Reward')
-            
-            # Add moving average
-            if len(self.episode_rewards) >= 10:
-                window = min(10, len(self.episode_rewards))
-                moving_avg = np.convolve(self.episode_rewards, np.ones(window)/window, mode='valid')
-                episodes_avg = range(window-1, len(self.episode_rewards))
-                self.ax_rewards.plot(episodes_avg, moving_avg, 'r-', linewidth=2, label='Moving Avg')
-            
-            self.ax_rewards.set_title(f'Episode Rewards (Episode {self.episode_count})')
-            self.ax_rewards.set_xlabel('Episode')
-            self.ax_rewards.set_ylabel('Reward')
-            self.ax_rewards.legend()
-            self.ax_rewards.grid(True, alpha=0.3)
-            
-            # Update episode lengths
-            self.ax_lengths.clear()
-            self.ax_lengths.plot(self.episode_lengths, 'g-', alpha=0.7)
-            self.ax_lengths.set_title('Episode Lengths')
-            self.ax_lengths.set_xlabel('Episode')
-            self.ax_lengths.set_ylabel('Steps')
-            self.ax_lengths.grid(True, alpha=0.3)
-            
-            # Update learning progress
-            self.ax_learning.clear()
-            if len(self.episode_rewards) > 1:
-                self.ax_learning.plot(self.episode_rewards, 'purple', alpha=0.6)
-                self.ax_learning.set_title(f'Training Progress (Step {self.num_timesteps})')
-                self.ax_learning.set_xlabel('Episode')
-                self.ax_learning.set_ylabel('Reward')
-                self.ax_learning.grid(True, alpha=0.3)
-            
-            # Update statistics
-            self._update_statistics()
-            
-            plt.tight_layout()
-            plt.pause(0.01)  # Small pause to update plots
-            
-        except Exception as e:
-            if self.verbose > 0:
-                print(f"⚠️ Plot update failed: {e}")
+    def _on_training_end(self) -> None:
+        """Called when training ends"""
+        self.is_plotting = False
+        if self.plot_thread and self.plot_thread.is_alive():
+            self.plot_thread.join(timeout=1.0)
+        
+        if self.fig:
+            plt.ioff()
+            plt.show()  # Keep final plot open
     
-    def _update_statistics(self):
-        """Update training statistics display."""
-        if not matplotlib_available:
-            return
-            
-        self.ax_stats.clear()
-        self.ax_stats.axis('off')
-        
-        # Calculate statistics
-        elapsed_time = time.time() - self.start_time
-        steps_per_second = self.num_timesteps / elapsed_time if elapsed_time > 0 else 0
-        
-        avg_reward = np.mean(self.episode_rewards[-10:]) if len(self.episode_rewards) >= 10 else 0
-        avg_length = np.mean(self.episode_lengths[-10:]) if len(self.episode_lengths) >= 10 else 0
-        
-        # Create statistics text
-        stats_text = f"""
-Training Statistics:
+    def close(self):
+        """Clean up resources"""
+        self.is_plotting = False
+        if self.fig:
+            plt.close(self.fig)
 
-Total Steps: {self.num_timesteps:,}
-Episodes: {self.episode_count}
-Elapsed Time: {elapsed_time/60:.1f} min
-Steps/sec: {steps_per_second:.1f}
-
-Recent Performance:
-Avg Reward (10 ep): {avg_reward:.2f}
-Avg Length (10 ep): {avg_length:.1f}
-
-Current Episode:
-Reward: {self.current_episode_reward:.2f}
-Length: {self.current_episode_length}
-"""
-        
-        self.ax_stats.text(0.05, 0.95, stats_text, transform=self.ax_stats.transAxes,
-                          verticalalignment='top', fontfamily='monospace', fontsize=10)
-    
-    def _on_training_end(self):
-        """Called when training ends."""
-        if matplotlib_available:
-            plt.ioff()  # Turn off interactive mode
-            plt.show()  # Keep plots open
-        
-        # Print final statistics
-        if len(self.episode_rewards) > 0:
-            print(f"\n📊 Final Training Statistics:")
-            print(f"   Total Episodes: {self.episode_count}")
-            print(f"   Average Reward: {np.mean(self.episode_rewards):.2f}")
-            print(f"   Best Reward: {np.max(self.episode_rewards):.2f}")
-            print(f"   Final 10 Episodes Avg: {np.mean(self.episode_rewards[-10:]):.2f}")
 
 
 class PerformanceMonitorCallback(BaseCallback):

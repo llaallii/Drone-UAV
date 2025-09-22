@@ -131,10 +131,14 @@ class RenderingSystem:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 1
                 )
             
-            # Create/update window
-            cv2.namedWindow(self.pip_window_name, cv2.WINDOW_NORMAL)
-            cv2.resizeWindow(self.pip_window_name, display_size[0] + 10, display_size[1] + 30)
-            cv2.moveWindow(self.pip_window_name, window_position[0], window_position[1])
+            # Create/update window with proper flags for resizable and movable window
+            cv2.namedWindow(self.pip_window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
+
+            # Only set initial position and size if window is not already created
+            if not hasattr(self, '_pip_window_initialized'):
+                cv2.resizeWindow(self.pip_window_name, display_size[0] + 10, display_size[1] + 30)
+                cv2.moveWindow(self.pip_window_name, window_position[0], window_position[1])
+                self._pip_window_initialized = True
             
             # Show image
             cv2.imshow(self.pip_window_name, bordered_image)
@@ -312,6 +316,26 @@ class RenderingSystem:
             self.close_pip_display()
         else:
             print("🖼️ PIP display will show on next render")
+
+    def move_pip_window(self, x: int, y: int):
+        """Move PIP window to new position."""
+        if self.opencv_available and self.pip_active:
+            try:
+                import cv2
+                cv2.moveWindow(self.pip_window_name, x, y)
+                print(f"🖼️ PIP window moved to ({x}, {y})")
+            except Exception as e:
+                print(f"⚠️ Failed to move PIP window: {e}")
+
+    def resize_pip_window(self, width: int, height: int):
+        """Resize PIP window."""
+        if self.opencv_available and self.pip_active:
+            try:
+                import cv2
+                cv2.resizeWindow(self.pip_window_name, width, height)
+                print(f"🖼️ PIP window resized to {width}x{height}")
+            except Exception as e:
+                print(f"⚠️ Failed to resize PIP window: {e}")
     
     def close_pip_display(self):
         """Close picture-in-picture display."""
@@ -320,6 +344,9 @@ class RenderingSystem:
                 import cv2
                 cv2.destroyWindow(self.pip_window_name)
                 self.pip_active = False
+                # Reset window initialization flag so it can be repositioned next time
+                if hasattr(self, '_pip_window_initialized'):
+                    delattr(self, '_pip_window_initialized')
                 print("🖼️ PIP display closed")
             except:
                 pass
