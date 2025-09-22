@@ -11,3 +11,7 @@ __pycache__/
 .vscode/
 my_test.py
 example.ipynb
+next_steps/
+logs/
+models/
+guide.pdf

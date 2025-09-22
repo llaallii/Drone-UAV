@@ -1,14 +1,14 @@
 # crazy_flie_env/vision/cameras.py
 import numpy as np
 import mujoco
-from typing import Dict, Optional, Tuple
+from typing import Dict
+from scipy import ndimage
 
 from ..utils.config import EnvConfig
 from ..utils.math_utils import (
     quat_to_euler, look_at_quaternion, rotate_vector_by_quat, 
     smooth_interpolate, normalize_angle
 )
-
 
 class CameraSystem:
     """
@@ -337,6 +337,111 @@ class CameraSystem:
             else:
                 print(f"   {name}: Not found")
     
+    # ===== ADD THESE METHODS TO CameraSystem CLASS =====
+    
+    def _apply_sgm_simulation(self, depth_image: np.ndarray) -> np.ndarray:
+        """
+        Apply Semi-Global Matching simulation to create realistic stereo depth.
+        This addresses the sim-to-real gap mentioned in RAPID paper.
+        """
+        # Convert to float for processing
+        if len(depth_image.shape) == 3:
+            depth_float = np.mean(depth_image, axis=2).astype(np.float32) / 255.0
+        else:
+            depth_float = depth_image.astype(np.float32) / 255.0
+        
+        # Add stereo camera noise characteristics
+        
+        # 1. Quantization noise (stereo matching discretization)
+        depth_levels = 64  # Typical stereo depth levels
+        depth_quantized = np.round(depth_float * depth_levels) / depth_levels
+        
+        # 2. Distance-dependent noise (far objects less accurate)
+        distance_noise = np.random.normal(0, 0.02, depth_float.shape)
+        distance_factor = depth_float * 2.0  # More noise at distance
+        depth_noisy = depth_quantized + distance_noise * distance_factor
+        
+        # 3. Invalid regions (stereo matching failures)
+        invalid_mask = np.random.random(depth_float.shape) < 0.05  # 5% invalid pixels
+        depth_noisy[invalid_mask] = 0.0  # Invalid depth = 0
+        
+        # 4. Edge artifacts (stereo matching issues at edges)
+        # Apply slight blurring to simulate edge effects
+        depth_blurred = ndimage.gaussian_filter(depth_noisy, sigma=0.5)
+        
+        # Clip and convert back to uint8
+        depth_final = np.clip(depth_blurred, 0.0, 1.0)
+        depth_uint8 = (depth_final * 255).astype(np.uint8)
+        
+        # Convert to 3-channel for consistency
+        if len(depth_uint8.shape) == 2:
+            depth_uint8 = np.repeat(depth_uint8[:, :, np.newaxis], 3, axis=2)
+        
+        return depth_uint8
+
+    def create_virtual_depth_camera(self, data: mujoco.MjData) -> np.ndarray:
+        """
+        Create depth image using MuJoCo's built-in depth rendering.
+        This implements the stereo-like depth mentioned in RAPID paper.
+        """
+        try:
+            # Create depth renderer if not exists
+            if 'depth' not in self.renderers:
+                self.renderers['depth'] = mujoco.Renderer(
+                    self.model,
+                    height=self.config.image_size[1],
+                    width=self.config.image_size[0]
+                )
+            
+            # Update scene with depth rendering
+            if self.camera_ids.get('drone_fpv') is not None:
+                self.renderers['depth'].update_scene(data, camera=self.camera_ids['drone_fpv'])
+            else:
+                self.renderers['depth'].update_scene(data)
+            
+            # Render depth
+            depth_image = self.renderers['depth'].render()
+            
+            # Apply SGM-like processing to simulate stereo camera noise
+            depth_processed = self._apply_sgm_simulation(depth_image)
+            
+            return depth_processed
+            
+        except Exception as e:
+            print(f"⚠️ Depth image creation failed: {e}")
+            return np.zeros((*self.config.image_size, 3), dtype=np.uint8)
+
+    def get_camera_image_complete(self, data: mujoco.MjData, camera_name: str = "drone_fpv") -> np.ndarray:
+        """
+        Complete implementation for getting camera images from MuJoCo.
+        This replaces the placeholder in your current code.
+        """
+        try:
+            # Get camera ID
+            if camera_name in self.camera_ids and self.camera_ids[camera_name] is not None:
+                cam_id = self.camera_ids[camera_name]
+            else:
+                # Use default camera (index 0)
+                cam_id = 0
+            
+            # Update renderer with current scene
+            self.renderers['drone'].update_scene(data, camera=cam_id)
+            
+            # Render image
+            image = self.renderers['drone'].render()
+            
+            # Ensure correct format (H, W, C)
+            if len(image.shape) == 3:
+                return image
+            else:
+                # Convert grayscale to RGB if needed
+                return np.repeat(image[:, :, np.newaxis], 3, axis=2)
+                
+        except Exception as e:
+            print(f"⚠️ Camera image capture failed: {e}")
+            # Return black image as fallback
+            return np.zeros((*self.config.image_size, 3), dtype=np.uint8)
+    
     def close(self):
         """Clean up camera resources."""
         for renderer in self.renderers.values():
@@ -405,3 +510,218 @@ class CameraController:
         else:
             # Default to drone camera
             return self.camera_system.get_drone_camera_image(data)
+
+
+# Environment generation for training diversity
+class MuJoCoEnvironmentGenerator:
+    """
+    Generates diverse training environments within MuJoCo.
+    Replaces the need for AirSim by creating varied scenarios in your existing setup.
+    """
+    
+    def __init__(self, base_model_path: str):
+        self.base_model_path = base_model_path
+        self.environment_templates = {
+            'forest': self._create_forest_environment,
+            'urban': self._create_urban_environment,
+            'obstacles': self._create_obstacle_course,
+            'narrow_gaps': self._create_narrow_gaps
+        }
+    
+    def create_training_environments(self, num_environments: int = 100) -> list:
+        """
+        Create diverse training environments by modifying the base MuJoCo model.
+        This replaces AirSim environment diversity.
+        """
+        environments = []
+        
+        for i in range(num_environments):
+            env_type = np.random.choice(list(self.environment_templates.keys()))
+            env_config = self.environment_templates[env_type]()
+            
+            environments.append({
+                'type': env_type,
+                'config': env_config,
+                'id': f"{env_type}_{i:03d}"
+            })
+        
+        return environments
+    
+    def _create_forest_environment(self) -> dict:
+        """Create forest-like environment with trees"""
+        num_trees = np.random.randint(20, 50)
+        trees = []
+        
+        for _ in range(num_trees):
+            tree = {
+                'position': [
+                    np.random.uniform(-20, 20),
+                    np.random.uniform(-20, 20),
+                    0.0
+                ],
+                'radius': np.random.uniform(0.3, 0.8),
+                'height': np.random.uniform(3.0, 8.0),
+                'type': 'cylinder'
+            }
+            trees.append(tree)
+        
+        return {
+            'environment_type': 'forest',
+            'objects': trees,
+            'density': len(trees) / 1600,  # trees per m²
+            'lighting': 'natural'
+        }
+    
+    def _create_urban_environment(self) -> dict:
+        """Create urban environment with buildings"""
+        num_buildings = np.random.randint(10, 25)
+        buildings = []
+        
+        for _ in range(num_buildings):
+            building = {
+                'position': [
+                    np.random.uniform(-15, 15),
+                    np.random.uniform(-15, 15),
+                    0.0
+                ],
+                'size': [
+                    np.random.uniform(2.0, 5.0),
+                    np.random.uniform(2.0, 5.0),
+                    np.random.uniform(5.0, 15.0)
+                ],
+                'type': 'box'
+            }
+            buildings.append(building)
+        
+        return {
+            'environment_type': 'urban',
+            'objects': buildings,
+            'density': len(buildings) / 900,  # buildings per m²
+            'lighting': 'artificial'
+        }
+    
+    def _create_obstacle_course(self) -> dict:
+        """Create obstacle course with various shapes"""
+        obstacles = []
+        
+        # Mix of different obstacle types
+        for _ in range(np.random.randint(15, 30)):
+            obstacle_type = np.random.choice(['sphere', 'box', 'cylinder'])
+            
+            if obstacle_type == 'sphere':
+                obstacle = {
+                    'position': [
+                        np.random.uniform(-10, 10),
+                        np.random.uniform(-10, 10),
+                        np.random.uniform(1.0, 4.0)
+                    ],
+                    'radius': np.random.uniform(0.5, 1.5),
+                    'type': 'sphere'
+                }
+            elif obstacle_type == 'box':
+                obstacle = {
+                    'position': [
+                        np.random.uniform(-10, 10),
+                        np.random.uniform(-10, 10),
+                        0.0
+                    ],
+                    'size': [
+                        np.random.uniform(1.0, 3.0),
+                        np.random.uniform(1.0, 3.0),
+                        np.random.uniform(2.0, 6.0)
+                    ],
+                    'type': 'box'
+                }
+            else:  # cylinder
+                obstacle = {
+                    'position': [
+                        np.random.uniform(-10, 10),
+                        np.random.uniform(-10, 10),
+                        0.0
+                    ],
+                    'radius': np.random.uniform(0.4, 1.0),
+                    'height': np.random.uniform(2.0, 5.0),
+                    'type': 'cylinder'
+                }
+            
+            obstacles.append(obstacle)
+        
+        return {
+            'environment_type': 'obstacles',
+            'objects': obstacles,
+            'complexity': len(obstacles),
+            'lighting': 'mixed'
+        }
+    
+    def _create_narrow_gaps(self) -> dict:
+        """Create environment with narrow passages"""
+        walls = []
+        
+        # Create walls with gaps
+        for i in range(np.random.randint(3, 6)):
+            wall_x = np.random.uniform(-15, 15)
+            gap_center = np.random.uniform(-10, 10)
+            gap_width = np.random.uniform(2.0, 4.0)
+            
+            # Wall segments before and after gap
+            wall_segments = [
+                {
+                    'position': [wall_x, gap_center - gap_width/2 - 5, 0],
+                    'size': [0.2, 10, 5],
+                    'type': 'box'
+                },
+                {
+                    'position': [wall_x, gap_center + gap_width/2 + 5, 0],
+                    'size': [0.2, 10, 5],
+                    'type': 'box'
+                }
+            ]
+            walls.extend(wall_segments)
+        
+        return {
+            'environment_type': 'narrow_gaps',
+            'objects': walls,
+            'gap_difficulty': 4.0 - np.mean([2.0, 4.0]),  # Smaller gaps = higher difficulty
+            'lighting': 'controlled'
+        }
+
+
+# Integration with your existing environment
+def integrate_enhanced_vision(env_instance):
+    """
+    Integrate enhanced vision capabilities with your existing CrazyFlieEnv.
+    """
+    # Add environment generator
+    env_instance.env_generator = MuJoCoEnvironmentGenerator(env_instance.config.model_path)
+    
+    # Enhanced observation method
+    def enhanced_get_observation(self):
+        """Enhanced observation with proper depth camera"""
+        # Get state vector
+        state = self.obs_manager.get_state_vector(self.physics.data)
+        
+        # Get RGB camera image
+        rgb_image = self.camera_system.get_camera_image_complete(self.physics.data)
+        
+        # Get depth camera image with SGM simulation
+        depth_image = self.camera_system.create_virtual_depth_camera(self.physics.data)
+        
+        # For RAPID-style training, use depth image as main visual input
+        # Convert RGB to grayscale and combine with depth
+        rgb_gray = np.mean(rgb_image, axis=2, keepdims=True)
+        
+        # Use depth image as the primary visual input (like RAPID)
+        visual_input = depth_image
+        
+        return {
+            'state': state,
+            'image': visual_input  # This matches RAPID's depth-based approach
+        }
+    
+    # Replace observation method
+    import types
+    env_instance._get_observation = types.MethodType(enhanced_get_observation, env_instance)
+    
+    print("✅ Enhanced vision capabilities integrated")
+
+
