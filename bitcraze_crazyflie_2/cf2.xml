@@ -23,6 +23,7 @@
     <material name="white" rgba="1 1 1 1"/>
     <material name="body_frame_plastic" rgba="0.102 0.102 0.102 1"/>
     <material name="burnished_chrome" rgba="0.898 0.898 0.898 1"/>
+    <material name="camera_marker" rgba="0 0 0 1"/>
 
     <mesh file="cf2_0.obj"/>
     <mesh file="cf2_1.obj"/>
@@ -112,8 +113,8 @@
       <site name="imu"/>
       <site name="actuation"/>
       <camera name="drone_fpv"
-        pos="0.25 0 0.05"
-        xyaxes="0 -1 0 0 0 1"
+        pos="0 0 -0.045"
+        xyaxes="0 1 0 0 0 1"
         fovy="90"/>
 
 

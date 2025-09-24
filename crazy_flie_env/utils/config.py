@@ -19,7 +19,7 @@ class EnvConfig:
     # Simulation parameters
     dt: float = 0.02  # 50Hz control loop
     physics_steps: int = 10  # Sub-steps per control step
-    max_episode_steps: int = 1000
+    max_episode_steps: int = 100000
     
     # Spawn parameters
     initial_height: float = 0.3  # 30cm
@@ -56,7 +56,7 @@ class EnvConfig:
     ], dtype=np.float32)
     
     # Camera parameters
-    image_size: Tuple[int, int] = (64, 64)
+    image_size: Tuple[int, int] = (1280, 720)
     image_channels: int = 3
     
     # Camera positioning
@@ -66,8 +66,8 @@ class EnvConfig:
     chase_smoothing_alpha: float = 0.25
     
     # Rendering
-    main_view_size: Tuple[int, int] = (640, 480)
-    pip_size: Tuple[int, int] = (160, 120)
+    main_view_size: Tuple[int, int] = (1280, 720)
+    pip_size: Tuple[int, int] = (1280, 720)
     
     # Control gains (will be calculated based on physics)
     # Altitude control

@@ -76,7 +76,7 @@ class DroneController:
         print("✅ Drone controller initialized")
         self._print_gain_summary()
     
-    def _calculate_physics_based_gains(self) -> Dict[str, Dict[str, float]]:
+    def _calculate_physics_based_gains(self) -> Dict[str, dict]:
         """Calculate PID gains based on drone physics and desired performance."""
         
         # === ALTITUDE CONTROL ===
