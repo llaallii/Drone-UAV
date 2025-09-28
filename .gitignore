@@ -15,3 +15,5 @@ next_steps/
 logs/
 models/
 guide.pdf
+Environments/
+bitcraze_crazyflie_2/

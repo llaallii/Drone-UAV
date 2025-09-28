@@ -10,8 +10,7 @@ class EnvConfig:
     """Configuration class for CrazyFlie environment."""
     
     # Model paths
-    model_path: str = r"C:\Users\Ratan.Bunkar\Learning\general\rl-agent\Drone-UAV\bitcraze_crazyflie_2"
-    
+    model_path: str = r"/home/lali/Projects/mujoco_drone/bitcraze_crazyflie_2"
     @property
     def xml_path(self) -> str:
         return os.path.join(self.model_path, "scene.xml")
