@@ -58,7 +58,14 @@ def main():
         while not stop_flag[0]:
             env.render()
             obs, reward, terminated, truncated, info = env.step(action.copy())
-            print(f"Step {step_count}: action={action}, reward={reward:.3f}, terminated={terminated}, truncated={truncated}")
+            state = obs['state']
+            x, y, z = state[0:3]
+            vx, vy, vz = state[3:6]
+            roll, pitch, yaw = state[6:9]
+            wx, wy, wz = state[9:12]
+            print(f"Step {step_count}: action={action}, reward={reward:.3f}, terminated={terminated}, truncated={truncated} | "
+                  f"pos=({x:.2f}, {y:.2f}, {z:.2f}), vel=({vx:.2f}, {vy:.2f}, {vz:.2f}), "
+                  f"orient=(roll={roll:.2f}, pitch={pitch:.2f}, yaw={yaw:.2f}), ang_vel=({wx:.2f}, {wy:.2f}, {wz:.2f})")
             step_count += 1
             if terminated or truncated:
                 print("Drone crashed or episode ended. Respawning...")

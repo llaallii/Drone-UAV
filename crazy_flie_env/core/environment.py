@@ -183,8 +183,6 @@ class CrazyFlieEnv(gym.Env):
         # Launch/update MuJoCo viewer
         self.renderer.render_main_view(self.physics.model, self.physics.data)
         
-        # Update camera positions
-        self.camera_system.update_camera_positions(self.physics.data)
         
         # Show drone camera PIP
         self.renderer.show_pip_overlay(

@@ -14,11 +14,7 @@ class CameraSystem:
     """
     Advanced camera system for drone environment.
     
-    Manages multiple camera views:
-    - Drone FPV camera (first-person view)
-    - Chase camera (follows drone smoothly)
-    - Overview camera (scene-wide view)
-    - Custom positioned cameras
+    Manages drone FPV camera (first-person view) and custom positioned cameras
     """
     
     def __init__(self, config: EnvConfig, model: mujoco.MjModel):
@@ -54,21 +50,9 @@ class CameraSystem:
                 self.model, mujoco.mjtObj.mjOBJ_CAMERA, "drone_fpv"
             )
             print("✅ Found drone FPV camera")
-            
         except Exception:
             print("⚠️ Drone FPV camera not found in model")
             self.camera_ids['drone_fpv'] = None
-        
-        try:
-            # Chase/overview camera
-            self.camera_ids['overview'] = mujoco.mj_name2id(
-                self.model, mujoco.mjtObj.mjOBJ_CAMERA, "overview"
-            )
-            print("✅ Found overview camera")
-            
-        except Exception:
-            print("⚠️ Overview camera not found in model")
-            self.camera_ids['overview'] = None
         
         # List all available cameras for debugging
         print("📷 Available cameras:")
@@ -146,98 +130,6 @@ class CameraSystem:
         # Set camera pose (this would require modifying camera in model)
         # For now, this is a placeholder for future implementation
         pass
-    
-    def update_camera_positions(self, data: mujoco.MjData):
-        """Update all dynamic camera positions."""
-        self._update_chase_camera(data)
-        # Add other camera updates here if needed
-    
-    def _update_chase_camera(self, data: mujoco.MjData):
-        """
-        Update chase camera to smoothly follow the drone.
-        
-        Implements sophisticated camera following with:
-        - Smooth distance and elevation changes
-        - Look-ahead prediction
-        - Collision avoidance (future enhancement)
-        """
-        if self.camera_ids['overview'] is None:
-            return
-        
-        # Get drone state
-        drone_pos = data.qpos[0:3].copy()
-        drone_quat = data.qpos[3:7].copy()
-        drone_vel = data.qvel[0:3].copy()
-        
-        # Extract yaw from quaternion
-        _, _, yaw = quat_to_euler(drone_quat)
-        
-        # Chase camera parameters
-        distance = self.chase_state['distance']
-        elevation_deg = self.chase_state['elevation']
-        height_offset = self.chase_state['height_offset']
-        
-        # Look-at point (slightly above drone, with velocity prediction)
-        velocity_prediction = drone_vel * 0.1  # 100ms look-ahead
-        lookat_target = drone_pos + velocity_prediction + np.array([0, 0, height_offset])
-        
-        # Camera position (behind and above drone)
-        elevation_rad = np.radians(elevation_deg)
-        
-        # Calculate camera position in spherical coordinates
-        back_direction = np.array([-np.cos(yaw), -np.sin(yaw), 0.0])
-        up_component = np.array([0.0, 0.0, -np.tan(elevation_rad)]) * distance
-        
-        camera_world_pos = lookat_target + distance * back_direction + up_component
-        
-        # Initialize smoothing state
-        if not self.chase_state['initialized']:
-            self.chase_state['lookat'] = lookat_target.copy()
-            self.chase_state['smoothed_distance'] = distance
-            self.chase_state['initialized'] = True
-        
-        # Smooth camera movement
-        alpha = self.config.chase_smoothing_alpha
-        self.chase_state['lookat'] = self._smooth_vector(
-            self.chase_state['lookat'], lookat_target, alpha
-        )
-        self.chase_state['smoothed_distance'] = smooth_interpolate(
-            self.chase_state['smoothed_distance'], distance, alpha
-        )
-        
-        # Apply smoothed values to camera
-        smoothed_distance = self.chase_state['smoothed_distance']
-        smoothed_lookat = self.chase_state['lookat']
-        
-        # Recalculate camera position with smoothed values
-        camera_pos = (smoothed_lookat + 
-                     smoothed_distance * back_direction + 
-                     up_component)
-        
-        # Update camera in model
-        cam_id = self.camera_ids['overview']
-        self.model.cam_pos[cam_id] = camera_pos
-        self.model.cam_quat[cam_id] = look_at_quaternion(camera_pos, smoothed_lookat)
-    
-    def _smooth_vector(self, old_vec: np.ndarray, new_vec: np.ndarray, 
-                      alpha: float) -> np.ndarray:
-        """Smooth vector interpolation."""
-        return old_vec * (1 - alpha) + new_vec * alpha
-    
-    def get_chase_camera_image(self, data: mujoco.MjData) -> np.ndarray:
-        """Get image from chase camera view."""
-        if self.camera_ids['overview'] is None:
-            return self.get_drone_camera_image(data)
-        
-        try:
-            self.renderers['pip'].update_scene(
-                data, camera=self.camera_ids['overview']
-            )
-            return self.renderers['pip'].render()
-            
-        except Exception as e:
-            print(f"⚠️ Chase camera failed: {e}")
-            return np.zeros((*self.config.pip_size, 3), dtype=np.uint8)
     
     def get_main_view_image(self, data: mujoco.MjData, camera_name: str = None) -> np.ndarray:
         """Get main view image for human rendering."""
