@@ -4,6 +4,9 @@ import mujoco
 from typing import Dict, Any, Callable
 
 from ..utils.config import EnvConfig
+from ..utils.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 class RewardCalculator:
@@ -27,7 +30,7 @@ class RewardCalculator:
         self.prev_position = None
         self.total_distance_traveled = 0.0
         
-        print("✅ Reward calculator initialized")
+        logger.info("Reward calculator initialized")
         self._print_reward_summary()
     
     def _setup_reward_components(self) -> Dict[str, Dict[str, Any]]:
@@ -65,8 +68,8 @@ class RewardCalculator:
             }
         }
     
-    def calculate_reward(self, data: mujoco.MjData, action: np.ndarray, 
-                        crashed: bool, goal_position: np.ndarray = None) -> float:
+    def calculate_reward(self, data: mujoco.MjData, action: np.ndarray,  # type: ignore
+                        crashed: bool, goal_position: np.ndarray = None) -> float: # type: ignore
         """
         Calculate total reward for current state and action.
         
@@ -98,7 +101,7 @@ class RewardCalculator:
         
         return total_reward
     
-    def _height_maintenance_reward(self, data: mujoco.MjData, action: np.ndarray, 
+    def _height_maintenance_reward(self, data: mujoco.MjData, action: np.ndarray,  # type: ignore
                                   crashed: bool, goal_position: np.ndarray) -> float:
         """Reward for maintaining target height."""
         if crashed:
@@ -112,7 +115,7 @@ class RewardCalculator:
         # Negative reward increases with distance from target
         return -height_error
     
-    def _stability_reward(self, data: mujoco.MjData, action: np.ndarray,
+    def _stability_reward(self, data: mujoco.MjData, action: np.ndarray, # type: ignore
                          crashed: bool, goal_position: np.ndarray) -> float:
         """Reward for stable flight (low angular velocities)."""
         if crashed:
@@ -124,22 +127,22 @@ class RewardCalculator:
         # Negative reward increases with angular speed
         return float(-angular_speed)
     
-    def _action_penalty(self, data: mujoco.MjData, action: np.ndarray,
+    def _action_penalty(self, data: mujoco.MjData, action: np.ndarray, # type: ignore
                        crashed: bool, goal_position: np.ndarray) -> float:
         """Penalty for large actions to encourage efficiency."""
         action_magnitude = np.linalg.norm(action)
         
         # Small penalty for large actions
         return float(-action_magnitude)
-    
-    def _crash_penalty(self, data: mujoco.MjData, action: np.ndarray,
+     
+    def _crash_penalty(self, data: mujoco.MjData, action: np.ndarray, # type: ignore
                       crashed: bool, goal_position: np.ndarray) -> float:
         """Large penalty for crashing."""
         if crashed:
             return self.config.crash_penalty
         return 0.0
     
-    def _progress_reward(self, data: mujoco.MjData, action: np.ndarray,
+    def _progress_reward(self, data: mujoco.MjData, action: np.ndarray, # type: ignore
                         crashed: bool, goal_position: np.ndarray) -> float:
         """Reward for making progress toward goal."""
         if crashed or goal_position is None:
@@ -153,12 +156,12 @@ class RewardCalculator:
             curr_dist = np.linalg.norm(current_position - goal_position)
             
             progress = prev_dist - curr_dist  # Positive if moving toward goal
-            return progress
+            return float(progress)
         
         self.prev_position = current_position.copy()
         return 0.0
     
-    def _efficiency_reward(self, data: mujoco.MjData, action: np.ndarray,
+    def _efficiency_reward(self, data: mujoco.MjData, action: np.ndarray, # type: ignore
                           crashed: bool, goal_position: np.ndarray) -> float:
         """Bonus for efficient movement patterns."""
         if crashed:
@@ -198,9 +201,9 @@ class RewardCalculator:
     
     def _print_reward_summary(self):
         """Print summary of reward components."""
-        print("🎯 Reward components:")
+        logger.info("Reward components:")
         for name, info in self.reward_components.items():
-            print(f"   {name}: weight={info['weight']:.3f} - {info['description']}")
+            logger.info(f"   {name}: weight={info['weight']:.3f} - {info['description']}")
 
 
 class NavigationRewardCalculator(RewardCalculator):
@@ -246,7 +249,7 @@ class NavigationRewardCalculator(RewardCalculator):
         self.waypoints = [wp.copy() for wp in waypoints]
         self.current_waypoint_idx = 0
     
-    def _goal_distance_penalty(self, data: mujoco.MjData, action: np.ndarray,
+    def _goal_distance_penalty(self, data: mujoco.MjData, action: np.ndarray, # type: ignore
                               crashed: bool, goal_position: np.ndarray) -> float:
         """Penalty proportional to distance from goal."""
         if crashed or goal_position is None:
@@ -255,10 +258,10 @@ class NavigationRewardCalculator(RewardCalculator):
         current_position = data.qpos[0:3]
         distance = np.linalg.norm(current_position - goal_position)
         
-        return -distance
+        return float(-distance)
     
-    def _goal_reached_bonus(self, data: mujoco.MjData, action: np.ndarray,
-                           crashed: bool, goal_position: np.ndarray) -> float:
+    def _goal_reached_bonus(self, data: mujoco.MjData, action: np.ndarray, # type: ignore
+                           crashed: bool, goal_position: np.ndarray) -> float: 
         """Large bonus for reaching the goal."""
         if crashed or goal_position is None:
             return 0.0
@@ -271,7 +274,7 @@ class NavigationRewardCalculator(RewardCalculator):
         
         return 0.0
     
-    def _waypoint_progress_reward(self, data: mujoco.MjData, action: np.ndarray,
+    def _waypoint_progress_reward(self, data: mujoco.MjData, action: np.ndarray, # type: ignore
                                  crashed: bool, goal_position: np.ndarray) -> float:
         """Reward for progressing through waypoints."""
         if crashed or not self.waypoints:
@@ -324,7 +327,7 @@ class ObstacleAvoidanceRewardCalculator(RewardCalculator):
         self.safe_distance_threshold = 1.0  # meters
         self.danger_distance_threshold = 0.5  # meters
     
-    def _obstacle_distance_reward(self, data: mujoco.MjData, action: np.ndarray,
+    def _obstacle_distance_reward(self, data: mujoco.MjData, action: np.ndarray, # type: ignore
                                  crashed: bool, goal_position: np.ndarray) -> float:
         """Reward for maintaining safe distance from obstacles."""
         if crashed:
@@ -334,7 +337,7 @@ class ObstacleAvoidanceRewardCalculator(RewardCalculator):
         # For now, return 0 as placeholder
         return 0.0
     
-    def _collision_risk_penalty(self, data: mujoco.MjData, action: np.ndarray,
+    def _collision_risk_penalty(self, data: mujoco.MjData, action: np.ndarray, # type: ignore
                                crashed: bool, goal_position: np.ndarray) -> float:
         """Penalty for high collision risk based on proximity and velocity."""
         if crashed:
@@ -343,7 +346,7 @@ class ObstacleAvoidanceRewardCalculator(RewardCalculator):
         # Placeholder - would need obstacle sensing
         return 0.0
     
-    def _safe_speed_reward(self, data: mujoco.MjData, action: np.ndarray,
+    def _safe_speed_reward(self, data: mujoco.MjData, action: np.ndarray, # type: ignore
                           crashed: bool, goal_position: np.ndarray) -> float:
         """Reward for slowing down near obstacles."""
         if crashed:

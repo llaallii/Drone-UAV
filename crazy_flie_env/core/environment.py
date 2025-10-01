@@ -1,7 +1,7 @@
 # crazy_flie_env/core/environment.py
 import gymnasium as gym
 import numpy as np
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 
 from .observation_space import ObservationManager
 from .action_space import ActionManager
@@ -11,6 +11,9 @@ from ..vision.cameras import CameraSystem
 from ..vision.rendering import RenderingSystem
 from ..rewards.reward_functions import RewardCalculator
 from ..utils.config import EnvConfig
+from ..utils.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 class CrazyFlieEnv(gym.Env):
@@ -25,7 +28,7 @@ class CrazyFlieEnv(gym.Env):
     - Real-time visualization
     """
     
-    def __init__(self, config: EnvConfig = None):
+    def __init__(self, config: Optional[EnvConfig] = None):
         super().__init__()
         
         # Use default config if none provided
@@ -41,10 +44,10 @@ class CrazyFlieEnv(gym.Env):
         # Episode tracking
         self.step_count = 0
         self._episode_active = False
-        
-        print(f"✅ CrazyFlie Environment initialized")
-        print(f"📊 Observation space: {self.observation_space}")
-        print(f"🎮 Action space: {self.action_space}")
+
+        logger.info("CrazyFlie Environment initialized")
+        logger.info(f"Observation space: {self.observation_space}")
+        logger.info(f"Action space: {self.action_space}")
 
     def _init_components(self):
         """Initialize all environment components."""
@@ -63,7 +66,7 @@ class CrazyFlieEnv(gym.Env):
         # Reward calculation
         self.reward_calc = RewardCalculator(self.config)
 
-    def reset(self, seed: int = None, options: Dict[str, Any] = None) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
+    def reset(self, *, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
         """Reset environment to initial state."""
         super().reset(seed=seed)
         
@@ -133,15 +136,21 @@ class CrazyFlieEnv(gym.Env):
 
     def _get_info(self) -> Dict[str, Any]:
         """Return additional info dictionary."""
+        drone_height = None
+        if self.physics.data is not None and hasattr(self.physics.data, "qpos"):
+            drone_height = self.physics.data.qpos[2]
         return {
             'step_count': self.step_count,
-            'drone_height': self.physics.data.qpos[2],
+            'drone_height': drone_height,
             'is_crashed': self._check_crash(),
             'episode_active': self._episode_active
         }
 
     def _check_crash(self) -> bool:
         """Check if drone has crashed."""
+        if self.physics.data is None or not hasattr(self.physics.data, "qpos"):
+            return True  # Consider as crashed if data is missing
+        
         height = self.physics.data.qpos[2]
         
         # Ground collision
@@ -163,8 +172,8 @@ class CrazyFlieEnv(gym.Env):
         if self._check_crash():
             return True
         
-        # Out of bounds
-        pos = self.physics.data.qpos[0:3]
+        # Out of bounds 
+        pos = self.physics.data.qpos[0:3] # type: ignore
         distance_from_origin = np.linalg.norm(pos[:2])
         
         if distance_from_origin > self.config.boundary_radius:
@@ -188,7 +197,7 @@ class CrazyFlieEnv(gym.Env):
         self.renderer.close()
         self.camera_system.close()
         self.physics.close()
-        print("🔒 Environment closed successfully")
+        logger.info("Environment closed successfully")
 
     def set_room_transparency(self, alpha: float = 0.35):
         """Set room transparency for better visualization."""
@@ -198,12 +207,12 @@ class CrazyFlieEnv(gym.Env):
     @property
     def drone_position(self) -> np.ndarray:
         """Current drone position."""
-        return self.physics.data.qpos[0:3].copy()
+        return self.physics.data.qpos[0:3].copy() # type: ignore
     
     @property
     def drone_velocity(self) -> np.ndarray:
         """Current drone velocity."""
-        return self.physics.data.qvel[0:3].copy()
+        return self.physics.data.qvel[0:3].copy() # type: ignore
     
     @property 
     def is_crashed(self) -> bool:

@@ -1,9 +1,12 @@
 # crazy_flie_env/core/action_space.py
 import numpy as np
 from gymnasium import spaces
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from ..utils.config import EnvConfig
+from ..utils.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 class ActionManager:
@@ -30,11 +33,11 @@ class ActionManager:
             dtype=np.float32
         )
         
-        print(f"✅ Action space defined:")
-        print(f"   Roll command: [{self.config.action_bounds_low[0]}, {self.config.action_bounds_high[0]}]")
-        print(f"   Pitch command: [{self.config.action_bounds_low[1]}, {self.config.action_bounds_high[1]}]")
-        print(f"   Yaw rate command: [{self.config.action_bounds_low[2]}, {self.config.action_bounds_high[2]}]")
-        print(f"   Thrust command: [{self.config.action_bounds_low[3]}, {self.config.action_bounds_high[3]}]")
+        logger.info("Action space defined:")
+        logger.info(f"   Roll command: [{self.config.action_bounds_low[0]}, {self.config.action_bounds_high[0]}]")
+        logger.info(f"   Pitch command: [{self.config.action_bounds_low[1]}, {self.config.action_bounds_high[1]}]")
+        logger.info(f"   Yaw rate command: [{self.config.action_bounds_low[2]}, {self.config.action_bounds_high[2]}]")
+        logger.info(f"   Thrust command: [{self.config.action_bounds_low[3]}, {self.config.action_bounds_high[3]}]")
         
         return action_space
     
@@ -94,7 +97,7 @@ class ActionManager:
         # Check for NaN/Inf
         is_finite = np.all(np.isfinite(action))
         
-        return within_bounds and is_finite
+        return bool(within_bounds and is_finite)
     
     def sample_action(self) -> np.ndarray:
         """Sample a random valid action."""
@@ -271,7 +274,7 @@ class ActionScheduler:
         # Keep schedule sorted by start time
         self.schedule.sort(key=lambda x: x['start_time'])
     
-    def get_action(self, current_time: float, default_action: np.ndarray = None) -> np.ndarray:
+    def get_action(self, current_time: float, default_action: 'Optional[np.ndarray]' = None) -> np.ndarray:
         """
         Get scheduled action for current time.
         

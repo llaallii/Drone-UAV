@@ -3,6 +3,7 @@ Simple training configuration for notebook use.
 """
 
 from dataclasses import dataclass
+from typing import Any
 import torch
 
 try:
@@ -22,9 +23,9 @@ class TrainingConfig:
     total_timesteps: int = 500_000
 
     # Environment
-    num_envs: int = 4
+    num_envs: int = 1
+    env_config: Any = None  # Will use EnvConfig() default
     seed: int = 42
-    env_config: any = None  # Will use EnvConfig() default
 
     # Learning parameters
     learning_rate: float = 3e-4
@@ -51,6 +52,12 @@ class TrainingConfig:
 
     # Device
     device: str = "auto"
+
+    # Visualization during training
+    render_during_training: bool = False
+    render_freq: int = 1000  # Render every N steps
+    show_live_metrics: bool = False
+    metrics_freq: int = 5000  # Print metrics every N steps
 
     def __post_init__(self):
         """Initialize after creation."""

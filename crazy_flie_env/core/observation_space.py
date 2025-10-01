@@ -1,11 +1,14 @@
 # crazy_flie_env/core/observation_space.py
 import numpy as np
-import mujoco
+from typing import Any
 from gymnasium import spaces
 from typing import Dict
 
 from ..utils.config import EnvConfig
 from ..utils.math_utils import quat_to_euler
+from ..utils.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 class ObservationManager:
@@ -34,11 +37,13 @@ class ObservationManager:
         )
         
         # Camera image: HxWxC
-        image_shape = (*self.config.image_size, self.config.image_channels)
+        # Config stores image_size as (width, height) but images are (height, width, channels)
+        width, height = self.config.image_size
+        image_shape = (height, width, self.config.image_channels)
         image_space = spaces.Box(
-            low=0, 
-            high=255, 
-            shape=image_shape, 
+            low=0,
+            high=255,
+            shape=image_shape,
             dtype=np.uint8
         )
         
@@ -48,9 +53,9 @@ class ObservationManager:
             'image': image_space
         })
         
-        print(f"✅ Observation space defined:")
-        print(f"   State vector: {len(self.config.state_bounds_low)} dimensions")
-        print(f"   Camera image: {image_shape}")
+        logger.info("Observation space defined:")
+        logger.info(f"   State vector: {len(self.config.state_bounds_low)} dimensions")
+        logger.info(f"   Camera image: {image_shape}")
         
         return obs_space
     
@@ -58,7 +63,7 @@ class ObservationManager:
         """Get the observation space."""
         return self.observation_space
     
-    def get_state_vector(self, data: mujoco.MjData) -> np.ndarray:
+    def get_state_vector(self, data: Any) -> np.ndarray:
         """Extract 12D state vector: [x,y,z, vx,vy,vz, roll,pitch,yaw, wx,wy,wz]."""
         
         # Position (first 3 elements of qpos)
@@ -84,7 +89,7 @@ class ObservationManager:
         
         return state_vector.astype(np.float32)
     
-    def get_drone_pose(self, data: mujoco.MjData) -> Dict[str, np.ndarray]:
+    def get_drone_pose(self, data: Any) -> Dict[str, np.ndarray]:
         """Get drone pose information in convenient format."""
         state = self.get_state_vector(data)
         
@@ -110,7 +115,7 @@ class ObservationManager:
         # Check for NaN/Inf
         is_finite = np.all(np.isfinite(state))
         
-        return within_bounds and is_finite
+        return bool(within_bounds and is_finite)
     
     def normalize_state(self, state: np.ndarray) -> np.ndarray:
         """Normalize state vector to [-1, 1] range."""
@@ -130,13 +135,13 @@ class ObservationManager:
         
         return denormalized.astype(np.float32)
     
-    def get_relative_goal_vector(self, data: mujoco.MjData, goal_position: np.ndarray) -> np.ndarray:
+    def get_relative_goal_vector(self, data: Any, goal_position: np.ndarray) -> np.ndarray:
         """Calculate relative goal vector from current position."""
         current_position = data.qpos[0:3]
         relative_goal = goal_position - current_position
         return relative_goal.astype(np.float32)
     
-    def extract_flight_metrics(self, data: mujoco.MjData) -> Dict[str, float]:
+    def extract_flight_metrics(self, data: Any) -> Dict[str, float]:
         """Extract useful flight metrics for analysis."""
         state = self.get_state_vector(data)
         

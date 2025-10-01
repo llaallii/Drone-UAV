@@ -113,7 +113,10 @@ class EnvConfig:
         assert len(self.action_bounds_low) == 4, "Action bounds must be 4D"
         assert len(self.state_bounds_low) == 12, "State bounds must be 12D"
         
-        print(f"✅ Configuration validated successfully")
+        # Import here to avoid circular import
+        from .logging_utils import get_logger
+        logger = get_logger(__name__)
+        logger.debug("Configuration validated successfully")
 
 
 @dataclass

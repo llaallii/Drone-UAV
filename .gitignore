@@ -19,3 +19,4 @@ Environments/
 train_archive/
 TRAINING_SIMPLIFIED.md
 QUICK_REFERENCE.md
+**/test_camera_angles.py

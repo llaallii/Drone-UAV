@@ -12,37 +12,60 @@ Usage in notebook:
 import os
 import numpy as np
 from datetime import datetime
-from typing import Tuple, Dict, Any, Optional
+from typing import Tuple, Dict, Any, Optional, Sequence
 
 from stable_baselines3 import PPO, SAC
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
+from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
+import gymnasium as gym
 
 from crazy_flie_env import CrazyFlieEnv
+from crazy_flie_env.utils.logging_utils import setup_logging, get_logger, log_system_info, log_training_start, log_training_complete
 from .config import TrainingConfig
 from .networks import CustomCNN
+from .callbacks import RenderCallback, LiveMetricsCallback, DroneStatsCallback
+
+logger = get_logger(__name__)
 
 
-def create_env(config: TrainingConfig, rank: int = 0):
-    """Create a single training environment."""
-    def _init():
-        env = CrazyFlieEnv(config=config.env_config)
-        env = Monitor(env)
-        env.reset(seed=config.seed + rank)
-        return env
-    return _init
+class ObservationFixWrapper(gym.ObservationWrapper):
+    """
+    Wrapper to ensure dict observations have correct dtypes for SB3.
+    Fixes rollout buffer dtype issues.
+    """
+    def observation(self, observation):
+        if isinstance(observation, dict):
+            fixed_obs = {}
+            for key, value in observation.items():
+                # Ensure proper numpy array with correct dtype
+                arr = np.asarray(value)
+                if key == 'state':
+                    fixed_obs[key] = arr.astype(np.float32)
+                elif key == 'image':
+                    fixed_obs[key] = arr.astype(np.uint8)
+                else:
+                    fixed_obs[key] = arr
+            return fixed_obs
+        return observation
 
 
 def create_vec_env(config: TrainingConfig):
-    """Create vectorized environment for parallel training."""
-    env_fns = [create_env(config, i) for i in range(config.num_envs)]
+    """Create vectorized environment using DummyVecEnv for notebook compatibility."""
 
-    if config.num_envs > 1:
-        return SubprocVecEnv(env_fns)
-    else:
-        return DummyVecEnv(env_fns)
+    def make_env(rank: int):
+        def _init():
+            env = CrazyFlieEnv(config=config.env_config)
+            env = ObservationFixWrapper(env)  # Fix observation dtypes
+            env = Monitor(env)
+            env.action_space.seed(config.seed + rank)
+            return env
+        return _init
 
+    env_fns = [make_env(i) for i in range(config.num_envs)]
+
+    # Use DummyVecEnv for notebook compatibility (works on Windows/Jupyter)
+    return DummyVecEnv(env_fns)
 
 def setup_directories(config: TrainingConfig) -> Tuple[str, str]:
     """Setup model and log directories."""
@@ -53,8 +76,8 @@ def setup_directories(config: TrainingConfig) -> Tuple[str, str]:
     os.makedirs(model_dir, exist_ok=True)
     os.makedirs(log_dir, exist_ok=True)
 
-    print(f"📁 Model directory: {model_dir}")
-    print(f"📁 Log directory: {log_dir}")
+    logger.info(f"Model directory: {model_dir}")
+    logger.info(f"Log directory: {log_dir}")
 
     return model_dir, log_dir
 
@@ -70,22 +93,38 @@ def train_ppo(config: TrainingConfig, verbose: bool = True) -> Tuple[PPO, Dict[s
     Returns:
         Tuple of (trained_model, results_dict)
     """
+    # Initialize logging
+    setup_logging()
+    log_system_info()
+    
     if verbose:
-        print("🚀 Starting PPO Training")
-        print(f"   Timesteps: {config.total_timesteps:,}")
-        print(f"   Environments: {config.num_envs}")
-        print(f"   Device: {config.device}")
+        logger.info("Starting PPO Training")
+        log_training_start({
+            "Algorithm": "PPO",
+            "Timesteps": f"{config.total_timesteps:,}",
+            "Environments": str(config.num_envs),
+            "Device": str(config.device),
+            "Learning Rate": str(config.learning_rate),
+            "Batch Size": str(config.batch_size)
+        })
 
     # Setup
     model_dir, log_dir = setup_directories(config)
     env = create_vec_env(config)
-    eval_env = create_vec_env(TrainingConfig(num_envs=1, seed=config.seed + 1000))
+
+    # Create eval config with same env_config
+    eval_config = TrainingConfig(
+        num_envs=1,
+        seed=config.seed + 1000,
+        env_config=config.env_config
+    )
+    eval_env = create_vec_env(eval_config)
 
     # PPO model
     policy_kwargs = {
         "features_extractor_class": CustomCNN,
         "features_extractor_kwargs": {"features_dim": 256},
-        "net_arch": [{"pi": [256, 256], "vf": [256, 256]}]
+        "net_arch": {"pi": [256, 256], "vf": [256, 256]}
     }
 
     model = PPO(
@@ -106,6 +145,24 @@ def train_ppo(config: TrainingConfig, verbose: bool = True) -> Tuple[PPO, Dict[s
 
     # Callbacks
     callbacks = []
+
+    # Rendering callback (if enabled)
+    if config.render_during_training:
+        render_callback = RenderCallback(
+            render_freq=config.render_freq,
+            verbose=1 if verbose else 0
+        )
+        callbacks.append(render_callback)
+        if verbose:
+            logger.info(f"Live rendering enabled (every {config.render_freq} steps)")
+
+    # Live metrics callback (if enabled)
+    if config.show_live_metrics:
+        metrics_callback = LiveMetricsCallback(
+            print_freq=config.metrics_freq,
+            verbose=1 if verbose else 0
+        )
+        callbacks.append(metrics_callback)
 
     # Checkpoint callback
     checkpoint_callback = CheckpointCallback(
@@ -140,7 +197,7 @@ def train_ppo(config: TrainingConfig, verbose: bool = True) -> Tuple[PPO, Dict[s
         model.save(final_path)
 
         if verbose:
-            print(f"✅ Training complete! Model saved to {final_path}")
+            logger.info(f"Training complete! Model saved to {final_path}")
 
         # Clean up
         env.close()
@@ -157,7 +214,7 @@ def train_ppo(config: TrainingConfig, verbose: bool = True) -> Tuple[PPO, Dict[s
         return model, results
 
     except KeyboardInterrupt:
-        print("\n⏹️ Training interrupted")
+        logger.info("Training interrupted")
         interrupted_path = os.path.join(model_dir, "interrupted_model")
         model.save(interrupted_path)
         env.close()
@@ -183,15 +240,22 @@ def train_sac(config: TrainingConfig, verbose: bool = True) -> Tuple[SAC, Dict[s
         Tuple of (trained_model, results_dict)
     """
     if verbose:
-        print("🚀 Starting SAC Training")
-        print(f"   Timesteps: {config.total_timesteps:,}")
-        print(f"   Environments: {config.num_envs}")
-        print(f"   Device: {config.device}")
+        logger.info("Starting SAC Training")
+        logger.info(f"   Timesteps: {config.total_timesteps:,}")
+        logger.info(f"   Environments: {config.num_envs}")
+        logger.info(f"   Device: {config.device}")
 
     # Setup
     model_dir, log_dir = setup_directories(config)
     env = create_vec_env(config)
-    eval_env = create_vec_env(TrainingConfig(num_envs=1, seed=config.seed + 1000))
+
+    # Create eval config with same env_config
+    eval_config = TrainingConfig(
+        num_envs=1,
+        seed=config.seed + 1000,
+        env_config=config.env_config
+    )
+    eval_env = create_vec_env(eval_config)
 
     # SAC model
     policy_kwargs = {
@@ -216,6 +280,24 @@ def train_sac(config: TrainingConfig, verbose: bool = True) -> Tuple[SAC, Dict[s
 
     # Callbacks
     callbacks = []
+
+    # Rendering callback (if enabled)
+    if config.render_during_training:
+        render_callback = RenderCallback(
+            render_freq=config.render_freq,
+            verbose=1 if verbose else 0
+        )
+        callbacks.append(render_callback)
+        if verbose:
+            logger.info(f"Live rendering enabled (every {config.render_freq} steps)")
+
+    # Live metrics callback (if enabled)
+    if config.show_live_metrics:
+        metrics_callback = LiveMetricsCallback(
+            print_freq=config.metrics_freq,
+            verbose=1 if verbose else 0
+        )
+        callbacks.append(metrics_callback)
 
     checkpoint_callback = CheckpointCallback(
         save_freq=config.save_freq,
@@ -248,7 +330,7 @@ def train_sac(config: TrainingConfig, verbose: bool = True) -> Tuple[SAC, Dict[s
         model.save(final_path)
 
         if verbose:
-            print(f"✅ Training complete! Model saved to {final_path}")
+            logger.info(f"Training complete! Model saved to {final_path}")
 
         # Clean up
         env.close()
@@ -265,7 +347,7 @@ def train_sac(config: TrainingConfig, verbose: bool = True) -> Tuple[SAC, Dict[s
         return model, results
 
     except KeyboardInterrupt:
-        print("\n⏹️ Training interrupted")
+        logger.info("Training interrupted")
         interrupted_path = os.path.join(model_dir, "interrupted_model")
         model.save(interrupted_path)
         env.close()

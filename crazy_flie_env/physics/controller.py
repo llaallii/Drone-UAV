@@ -1,10 +1,14 @@
 # crazy_flie_env/physics/controller.py
 import numpy as np
 import mujoco
+# from mujoco import MjModel, MjData
 from typing import Dict, Tuple
 import math
 
 from ..utils.config import EnvConfig
+from ..utils.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 class PIDController:
@@ -59,9 +63,9 @@ class DroneController:
     - Attitude control (roll, pitch, yaw)
     - Rate control (angular velocities)
     """
-    
-    def __init__(self, config: EnvConfig, model: mujoco.MjModel):
+    def __init__(self, config: EnvConfig, model):
         self.config = config
+        self.model = model
         self.model = model
         
         # Calculate physics-based gains
@@ -73,7 +77,7 @@ class DroneController:
         # Get actuator IDs
         self.actuator_ids = self._get_actuator_ids()
         
-        print("✅ Drone controller initialized")
+        logger.info("Drone controller initialized")
         self._print_gain_summary()
     
     def _calculate_physics_based_gains(self) -> Dict[str, dict]:
@@ -170,25 +174,17 @@ class DroneController:
         actuator_ids = {}
         
         try:
-            actuator_ids['thrust'] = mujoco.mj_name2id(
-                self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "body_thrust"
-            )
-            actuator_ids['x_moment'] = mujoco.mj_name2id(
-                self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "x_moment"
-            )
-            actuator_ids['y_moment'] = mujoco.mj_name2id(
-                self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "y_moment"
-            )
-            actuator_ids['z_moment'] = mujoco.mj_name2id(
-                self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, "z_moment"
-            )
+            actuator_ids['thrust'] = self.model.actuator(name="body_thrust").id
+            actuator_ids['x_moment'] = self.model.actuator(name="x_moment").id
+            actuator_ids['y_moment'] = self.model.actuator(name="y_moment").id
+            actuator_ids['z_moment'] = self.model.actuator(name="z_moment").id
         except Exception as e:
-            print(f"⚠️ Warning: Actuator setup failed: {e}")
+            logger.warning(f"Actuator setup failed: {e}")
             actuator_ids = {}
         
         return actuator_ids
     
-    def apply_control(self, data: mujoco.MjData, action: np.ndarray):
+    def apply_control(self, data, action: np.ndarray):
         """Apply control action to drone."""
         roll_cmd, pitch_cmd, yaw_rate_cmd, thrust_cmd = action
         
@@ -236,7 +232,7 @@ class DroneController:
         # Apply to MuJoCo actuators
         self._set_actuator_commands(data, thrust_force, roll_torque, pitch_torque, yaw_torque)
     
-    def _set_actuator_commands(self, data: mujoco.MjData, thrust: float, 
+    def _set_actuator_commands(self, data, thrust: float, 
                               roll_torque: float, pitch_torque: float, yaw_torque: float):
         """Set actuator commands in MuJoCo."""
         try:
@@ -252,7 +248,7 @@ class DroneController:
                 data.qfrc_applied[3:6] = [roll_torque, pitch_torque, yaw_torque]
                 
         except Exception as e:
-            print(f"⚠️ Control application failed: {e}")
+            logger.error(f"Control application failed: {e}")
     
     def _quat_to_euler(self, quat: np.ndarray) -> Tuple[float, float, float]:
         """Convert quaternion [w,x,y,z] to Euler angles [roll,pitch,yaw]."""
@@ -283,13 +279,13 @@ class DroneController:
     
     def _print_gain_summary(self):
         """Print controller gain summary."""
-        print(f"🎛️ Controller gains:")
-        print(f"   Altitude: Kp={self.gains['altitude']['kp']:.3f}, "
+        logger.debug("Controller gains:")
+        logger.debug(f"   Altitude: Kp={self.gains['altitude']['kp']:.3f}, "
               f"Ki={self.gains['altitude']['ki']:.3f}, Kd={self.gains['altitude']['kd']:.3f}")
-        print(f"   Roll: Kp={self.gains['attitude']['roll']['kp']:.6f}")
-        print(f"   Yaw: Kp={self.gains['attitude']['yaw']['kp']:.6f}")
+        logger.debug(f"   Roll: Kp={self.gains['attitude']['roll']['kp']:.6f}")
+        logger.debug(f"   Yaw: Kp={self.gains['attitude']['yaw']['kp']:.6f}")
     
-    def get_control_diagnostics(self, data: mujoco.MjData) -> Dict[str, float]:
+    def get_control_diagnostics(self, data) -> Dict[str, float]:
         """Get controller diagnostic information."""
         current_pos = data.qpos[0:3].copy()
         current_quat = data.qpos[3:7].copy()

@@ -9,6 +9,9 @@ from ..utils.math_utils import (
     quat_to_euler, look_at_quaternion, rotate_vector_by_quat, 
     smooth_interpolate, normalize_angle
 )
+from ..utils.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 class CameraSystem:
     """
@@ -17,7 +20,7 @@ class CameraSystem:
     Manages drone FPV camera (first-person view) and custom positioned cameras
     """
     
-    def __init__(self, config: EnvConfig, model: mujoco.MjModel):
+    def __init__(self, config: EnvConfig, model: mujoco.MjModel): # type: ignore
         self.config = config
         self.model = model
         
@@ -39,28 +42,26 @@ class CameraSystem:
         self._setup_cameras()
         self._create_renderers()
         
-        print("✅ Camera system initialized")
+        logger.info("Camera system initialized")
         self._print_camera_info()
     
     def _setup_cameras(self):
         """Find and setup cameras in the MuJoCo model."""
         try:
             # Drone FPV camera (attached to drone body)
-            self.camera_ids['drone_fpv'] = mujoco.mj_name2id(
-                self.model, mujoco.mjtObj.mjOBJ_CAMERA, "drone_fpv"
-            )
-            print("✅ Found drone FPV camera")
+            self.camera_ids['drone_fpv'] = mujoco.mj_name2id( self.model, mujoco.mjtObj.mjOBJ_CAMERA, "drone_fpv") # type: ignore
+            logger.info("Found drone FPV camera")
         except Exception:
-            print("⚠️ Drone FPV camera not found in model")
+            logger.warning("Drone FPV camera not found in model")
             self.camera_ids['drone_fpv'] = None
         
         # List all available cameras for debugging
-        print("📷 Available cameras:")
+        logger.debug("Available cameras:")
         for i in range(self.model.ncam):
-            cam_name = mujoco.mj_id2name(
-                self.model, mujoco.mjtObj.mjOBJ_CAMERA, i
+            cam_name = mujoco.mj_id2name(       # type: ignore
+                self.model, mujoco.mjtObj.mjOBJ_CAMERA, i # type: ignore
             ) or f"camera_{i}"
-            print(f"   Camera {i}: {cam_name}")
+            logger.debug(f"   Camera {i}: {cam_name}")
     
     def _create_renderers(self):
         """Create MuJoCo renderers for different camera views."""
@@ -85,9 +86,9 @@ class CameraSystem:
             width=self.config.main_view_size[0]
         )
         
-        print(f"✅ Created {len(self.renderers)} renderers")
+        logger.info(f"Created {len(self.renderers)} renderers")
     
-    def get_drone_camera_image(self, data: mujoco.MjData) -> np.ndarray:
+    def get_drone_camera_image(self, data: mujoco.MjData) -> np.ndarray: # type: ignore
         """
         Get image from drone's FPV camera.
         
@@ -113,11 +114,11 @@ class CameraSystem:
             return image
             
         except Exception as e:
-            print(f"⚠️ Drone camera failed: {e}")
+            logger.error(f"Drone camera failed: {e}")
             # Return black image as fallback
             return np.zeros((*self.config.image_size, 3), dtype=np.uint8)
     
-    def _update_virtual_fpv_camera(self, data: mujoco.MjData):
+    def _update_virtual_fpv_camera(self, data: mujoco.MjData): # type: ignore
         """Create virtual FPV camera when model doesn't have one."""
         # Get drone pose
         drone_pos = data.qpos[0:3].copy()
@@ -131,7 +132,7 @@ class CameraSystem:
         # For now, this is a placeholder for future implementation
         pass
     
-    def get_main_view_image(self, data: mujoco.MjData, camera_name: str = None) -> np.ndarray:
+    def get_main_view_image(self, data: mujoco.MjData, camera_name: str = None) -> np.ndarray: # type: ignore
         """Get main view image for human rendering."""
         try:
             if camera_name and camera_name in self.camera_ids:
@@ -144,11 +145,13 @@ class CameraSystem:
             return self.renderers['main'].render()
             
         except Exception as e:
-            print(f"⚠️ Main view failed: {e}")
+            logger.error(f"Main view failed: {e}")
             return np.zeros((*self.config.main_view_size, 3), dtype=np.uint8)
     
-    def set_chase_camera_params(self, distance: float = None, elevation: float = None,
-                               height_offset: float = None):
+    from typing import Optional
+
+    def set_chase_camera_params(self, distance: Optional[float] = None, elevation: Optional[float] = None, 
+                               height_offset: Optional[float] = None):
         """
         Dynamically adjust chase camera parameters.
         
@@ -166,7 +169,7 @@ class CameraSystem:
         if height_offset is not None:
             self.chase_state['height_offset'] = height_offset
         
-        print(f"🎥 Chase camera updated: distance={self.chase_state['distance']:.1f}m, "
+        logger.debug(f"Chase camera updated: distance={self.chase_state['distance']:.1f}m, "
               f"elevation={self.chase_state['elevation']:.1f}°, "
               f"height_offset={self.chase_state['height_offset']:.1f}m")
     
@@ -191,7 +194,7 @@ class CameraSystem:
         """
         # This would require dynamically modifying the MuJoCo model
         # For now, this is a placeholder for future implementation
-        print(f"⚠️ Custom camera '{name}' not yet supported")
+        logger.warning(f"Custom camera '{name}' not yet supported")
         return False
     
     def get_camera_info(self) -> Dict[str, Dict]:
@@ -217,7 +220,7 @@ class CameraSystem:
     def _print_camera_info(self):
         """Print camera system information."""
         info = self.get_camera_info()
-        print("📷 Camera system status:")
+        logger.debug("Camera system status:")
         
         for name, details in info.items():
             if name == 'chase_state':
@@ -225,9 +228,9 @@ class CameraSystem:
                 
             if details.get('id') is not None:
                 pos = details['position']
-                print(f"   {name}: ID={details['id']}, pos=[{pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f}]")
+                logger.debug(f"   {name}: ID={details['id']}, pos=[{pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f}]")
             else:
-                print(f"   {name}: Not found")
+                logger.debug(f"   {name}: Not found")
     
     # ===== ADD THESE METHODS TO CameraSystem CLASS =====
     
@@ -271,7 +274,7 @@ class CameraSystem:
         
         return depth_uint8
 
-    def create_virtual_depth_camera(self, data: mujoco.MjData) -> np.ndarray:
+    def create_virtual_depth_camera(self, data: mujoco.MjData) -> np.ndarray: # type: ignore
         """
         Create depth image using MuJoCo's built-in depth rendering.
         This implements the stereo-like depth mentioned in RAPID paper.
@@ -300,10 +303,10 @@ class CameraSystem:
             return depth_processed
             
         except Exception as e:
-            print(f"⚠️ Depth image creation failed: {e}")
+            logger.error(f"Depth image creation failed: {e}")
             return np.zeros((*self.config.image_size, 3), dtype=np.uint8)
 
-    def get_camera_image_complete(self, data: mujoco.MjData, camera_name: str = "drone_fpv") -> np.ndarray:
+    def get_camera_image_complete(self, data: mujoco.MjData, camera_name: str = "drone_fpv") -> np.ndarray: # type: ignore
         """
         Complete implementation for getting camera images from MuJoCo.
         This replaces the placeholder in your current code.
@@ -330,7 +333,7 @@ class CameraSystem:
                 return np.repeat(image[:, :, np.newaxis], 3, axis=2)
                 
         except Exception as e:
-            print(f"⚠️ Camera image capture failed: {e}")
+            logger.error(f"Camera image capture failed: {e}")
             # Return black image as fallback
             return np.zeros((*self.config.image_size, 3), dtype=np.uint8)
     
@@ -343,66 +346,7 @@ class CameraSystem:
                 pass
         
         self.renderers.clear()
-        print("🔒 Camera system closed")
-
-
-class CameraController:
-    """
-    Utility class for controlling camera behavior during episodes.
-    
-    Provides high-level camera control for different scenarios:
-    - Cinematic camera movements
-    - Automatic camera switching
-    - Recording-friendly camera paths
-    """
-    
-    def __init__(self, camera_system: CameraSystem):
-        self.camera_system = camera_system
-        self.active_mode = 'chase'
-        self.mode_timer = 0.0
-        
-        # Camera modes configuration
-        self.modes = {
-            'chase': {'duration': float('inf'), 'switch_to': None},
-            'drone_fpv': {'duration': 10.0, 'switch_to': 'chase'},
-            'overview': {'duration': 5.0, 'switch_to': 'chase'},
-            'cinematic': {'duration': 15.0, 'switch_to': 'chase'}
-        }
-    
-    def update(self, data: mujoco.MjData, dt: float):
-        """Update camera controller."""
-        self.mode_timer += dt
-        
-        # Handle automatic mode switching
-        current_mode = self.modes[self.active_mode]
-        if (current_mode['switch_to'] is not None and 
-            self.mode_timer > current_mode['duration']):
-            self.switch_mode(current_mode['switch_to'])
-        
-        # Update camera system
-        self.camera_system.update_camera_positions(data)
-    
-    def switch_mode(self, mode_name: str):
-        """Switch camera mode."""
-        if mode_name in self.modes:
-            self.active_mode = mode_name
-            self.mode_timer = 0.0
-            print(f"🎥 Camera mode switched to: {mode_name}")
-        else:
-            print(f"⚠️ Unknown camera mode: {mode_name}")
-    
-    def get_current_image(self, data: mujoco.MjData) -> np.ndarray:
-        """Get image from currently active camera mode."""
-        if self.active_mode == 'drone_fpv':
-            return self.camera_system.get_drone_camera_image(data)
-        elif self.active_mode == 'chase':
-            return self.camera_system.get_chase_camera_image(data)
-        elif self.active_mode == 'overview':
-            return self.camera_system.get_main_view_image(data, 'overview')
-        else:
-            # Default to drone camera
-            return self.camera_system.get_drone_camera_image(data)
-
+        logger.info("Camera system closed")
 
 # Environment generation for training diversity
 class MuJoCoEnvironmentGenerator:
@@ -614,6 +558,6 @@ def integrate_enhanced_vision(env_instance):
     import types
     env_instance._get_observation = types.MethodType(enhanced_get_observation, env_instance)
     
-    print("✅ Enhanced vision capabilities integrated")
+    logger.info("Enhanced vision capabilities integrated")
 
 

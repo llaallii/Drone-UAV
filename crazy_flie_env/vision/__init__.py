@@ -1,7 +1,7 @@
-from .cameras import CameraSystem, CameraController, MuJoCoEnvironmentGenerator, integrate_enhanced_vision
+from .cameras import CameraSystem, MuJoCoEnvironmentGenerator
 from .rendering import RenderingSystem, RecordingManager, VisualizationEffects
 
 __all__ = [
-    "CameraSystem", "CameraController", "MuJoCoEnvironmentGenerator", "integrate_enhanced_vision",
+    "CameraSystem", "MuJoCoEnvironmentGenerator",
     "RenderingSystem", "RecordingManager", "VisualizationEffects"
 ]

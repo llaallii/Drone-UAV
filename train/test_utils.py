@@ -7,6 +7,9 @@ from typing import Tuple, Optional, List
 from stable_baselines3 import PPO, SAC
 from crazy_flie_env import CrazyFlieEnv
 from crazy_flie_env.utils.config import EnvConfig
+from crazy_flie_env.utils.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 def test_model(model_path: str,
@@ -37,9 +40,9 @@ def test_model(model_path: str,
         raise ValueError(f"Unknown algorithm: {algorithm}")
 
     if verbose:
-        print(f"🧪 Testing {algorithm} model")
-        print(f"   Episodes: {num_episodes}")
-        print(f"   Model: {model_path}")
+        logger.info(f"Testing {algorithm} model")
+        logger.info(f"   Episodes: {num_episodes}")
+        logger.info(f"   Model: {model_path}")
 
     # Create test environment
     env = CrazyFlieEnv(config=EnvConfig())
@@ -74,7 +77,7 @@ def test_model(model_path: str,
 
         if verbose:
             status = "✅" if not info.get('is_crashed', False) else "❌"
-            print(f"  Ep {episode+1:2d}: Reward={episode_reward:7.2f}, Steps={steps:3d} {status}")
+            logger.info(f"  Ep {episode+1:2d}: Reward={episode_reward:7.2f}, Steps={steps:3d} {status}")
 
     env.close()
 
@@ -89,10 +92,10 @@ def test_model(model_path: str,
     }
 
     if verbose:
-        print(f"\n📊 Results:")
-        print(f"   Avg Reward: {metrics['avg_reward']:.2f} ± {metrics['std_reward']:.2f}")
-        print(f"   Success Rate: {metrics['success_rate']:.1%}")
-        print(f"   Avg Length: {metrics['avg_length']:.1f} steps")
+        logger.info(f"\n📊 Results:")
+        logger.info(f"   Avg Reward: {metrics['avg_reward']:.2f} ± {metrics['std_reward']:.2f}")
+        logger.info(f"   Success Rate: {metrics['success_rate']:.1%}")
+        logger.info(f"   Avg Length: {metrics['avg_length']:.1f} steps")
 
     return metrics['avg_reward'], metrics
 
@@ -147,7 +150,7 @@ def visualize_episode(model_path: str,
             break
 
     env.close()
-    print(f"📹 Episode completed in {len(trajectory)} steps")
+    logger.info(f"Episode completed in {len(trajectory)} steps")
 
     return trajectory
 
@@ -165,13 +168,13 @@ def compare_models(model_paths: dict,
         Dict with comparison results
     """
 
-    print(f"🏆 Comparing {len(model_paths)} models")
-    print(f"   Test episodes: {num_episodes}\n")
+    logger.info(f"Comparing {len(model_paths)} models")
+    logger.info(f"   Test episodes: {num_episodes}\n")
 
     results = {}
 
     for name, path in model_paths.items():
-        print(f"Testing {name}...")
+        logger.info(f"Testing {name}...")
 
         # Detect algorithm from name or use default
         algorithm = "PPO"
@@ -187,16 +190,16 @@ def compare_models(model_paths: dict,
         )
 
         results[name] = metrics
-        print(f"  {name}: {avg_reward:.2f} avg reward\n")
+        logger.info(f"  {name}: {avg_reward:.2f} avg reward\n")
 
     # Print comparison table
-    print("\n📊 Comparison Results:")
-    print("=" * 70)
-    print(f"{'Model':<20} {'Avg Reward':>12} {'Success Rate':>14} {'Avg Length':>12}")
-    print("-" * 70)
+    logger.info("\n📊 Comparison Results:")
+    logger.info("=" * 70)
+    logger.info(f"{'Model':<20} {'Avg Reward':>12} {'Success Rate':>14} {'Avg Length':>12}")
+    logger.info("-" * 70)
 
     for name, metrics in results.items():
-        print(f"{name:<20} {metrics['avg_reward']:>12.2f} "
+        logger.info(f"{name:<20} {metrics['avg_reward']:>12.2f} "
               f"{metrics['success_rate']:>13.1%} {metrics['avg_length']:>12.1f}")
 
     return results
@@ -210,5 +213,5 @@ def quick_test(model_path: str, algorithm: str = "PPO"):
         model_path: Path to model
         algorithm: Algorithm type
     """
-    print(f"🚀 Quick Test - {algorithm}")
+    logger.info(f"Quick Test - {algorithm}")
     test_model(model_path, algorithm, num_episodes=3, render=True)

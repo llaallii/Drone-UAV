@@ -6,6 +6,9 @@ import torch
 import torch.nn as nn
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 import gymnasium as gym
+from crazy_flie_env.utils.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 class CustomCNN(BaseFeaturesExtractor):
@@ -26,7 +29,7 @@ class CustomCNN(BaseFeaturesExtractor):
         else:
             raise ValueError("Expected Dict observation space with 'image' and 'state'")
 
-        print(f"🧠 CNN Input - Image: {img_shape}, State: {state_dim}D")
+        logger.debug(f"CNN Input - Image: {img_shape}, State: {state_dim}D")
 
         # CNN for image processing
         self.cnn = nn.Sequential(
@@ -60,7 +63,7 @@ class CustomCNN(BaseFeaturesExtractor):
             cnn_out = self.cnn(sample)
             cnn_output_size = cnn_out.view(1, -1).shape[1]
 
-        print(f"🧠 CNN output: {cnn_output_size}D")
+        logger.debug(f"CNN output: {cnn_output_size}D")
 
         # State processing
         self.state_processor = nn.Sequential(
@@ -80,7 +83,7 @@ class CustomCNN(BaseFeaturesExtractor):
             nn.LeakyReLU()
         )
 
-        print(f"🧠 Output features: {features_dim}D")
+        logger.debug(f"Output features: {features_dim}D")
 
     def forward(self, observations: dict) -> torch.Tensor:
         """Process observations through network."""

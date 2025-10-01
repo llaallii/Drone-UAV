@@ -2,9 +2,12 @@
 import numpy as np
 import mujoco
 import mujoco.viewer
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, Callable
 
 from ..utils.config import EnvConfig
+from ..utils.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 class RenderingSystem:
@@ -20,7 +23,7 @@ class RenderingSystem:
     - Screenshot/recording capabilities
     """
     
-    def __init__(self, config: EnvConfig, model: mujoco.MjModel):
+    def __init__(self, config: EnvConfig, model: mujoco.MjModel): # type: ignore
         self.config = config
         self.model = model
         
@@ -35,7 +38,7 @@ class RenderingSystem:
         self.frame_count = 0
         self.render_times = []
         
-        print(f"✅ Rendering system initialized (OpenCV: {'✅' if self.opencv_available else '❌'})")
+        logger.info(f"Rendering system initialized (OpenCV: {'Available' if self.opencv_available else 'Not available'})")
     
     def _check_opencv(self) -> bool:
         try:
@@ -44,41 +47,79 @@ class RenderingSystem:
         except ImportError:
             return False
     
-    def render_main_view(self, model: mujoco.MjModel, data: mujoco.MjData):
+    def render_main_view(self, model: mujoco.MjModel, data: mujoco.MjData): # type: ignore
         """
         Render main MuJoCo viewer window.
-        
+
         Args:
             model: MuJoCo model
             data: MuJoCo simulation data
         """
         import time
+        import sys
         start_time = time.time()
-        
+
         try:
             # Launch viewer if not already active
             if self.viewer is None:
-                self.viewer = mujoco.viewer.launch_passive(model, data)
-                self.viewer_initialized = True
-                print("🖥️ MuJoCo viewer launched")
-            
-            # Sync viewer with simulation
+                try:
+                    self.viewer = mujoco.viewer.launch_passive(model, data)
+                    self.viewer_initialized = True
+                    logger.info("MuJoCo viewer launched")
+
+                    # Windows/Jupyter specific: Check if viewer window is actually visible
+                    if sys.platform == 'win32':
+                        import time
+                        time.sleep(0.1)  # Give viewer time to initialize
+
+                        if self.viewer is not None and hasattr(self.viewer, 'is_running'):
+                            if not self.viewer.is_running():
+                                logger.warning("Note: MuJoCo viewer may not display properly in Jupyter/Windows environments.")
+                                logger.warning("   For best results, run training scripts directly in Python (not Jupyter).")
+                except Exception as viewer_error:
+                    logger.warning(f"MuJoCo viewer launch failed: {viewer_error}")
+                    logger.warning("   Continuing training without visualization.")
+                    logger.warning("   To enable viewer: Run script outside Jupyter or use a different OS.")
+                    self.viewer = None
+                    self.viewer_initialized = False
+                    return
+
+            # Check if viewer is still alive
             if self.viewer is not None:
-                self.viewer.sync()
-            
+                try:
+                    # Sync viewer with simulation
+                    self.viewer.sync()
+                except Exception as sync_error:
+                    # Viewer might have been closed by user
+                    if "closed" in str(sync_error).lower() or "invalid" in str(sync_error).lower():
+                        logger.info("MuJoCo viewer was closed")
+                        self.viewer = None
+                        self.viewer_initialized = False
+                        return
+                    else:
+                        raise
+
             # Track performance
             render_time = time.time() - start_time
             self.render_times.append(render_time)
             self.frame_count += 1
-            
+
             # Keep only recent render times for performance monitoring
             if len(self.render_times) > 100:
                 self.render_times = self.render_times[-100:]
-                
+
         except Exception as e:
-            print(f"⚠️ Main view rendering failed: {e}")
+            logger.error(f"Main view rendering failed: {e}")
+            if self.frame_count == 0:
+                # First render failed - provide helpful guidance
+                logger.error("   Troubleshooting:")
+                logger.error("   1. MuJoCo viewer may not work in Jupyter notebooks on Windows")
+                logger.error("   2. Try running training script directly: python train/simple_train.py")
+                logger.error("   3. Or set render_during_training=False in config")
+            self.viewer = None
+            self.viewer_initialized = False
     
-    def set_room_transparency(self, model: mujoco.MjModel, alpha: float = 0.35):
+    def set_room_transparency(self, model: mujoco.MjModel, alpha: float = 0.35): # type: ignore
         """
         Set transparency for room/environment geometry.
         
@@ -94,12 +135,12 @@ class RenderingSystem:
             
             for mat_name in room_materials:
                 try:
-                    mat_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_MATERIAL, mat_name)
+                    mat_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_MATERIAL, mat_name) # type: ignore
                     if mat_id >= 0:
                         rgba = model.mat_rgba[mat_id].copy()
                         rgba[3] = alpha  # Set alpha channel
                         model.mat_rgba[mat_id] = rgba
-                        print(f"🎨 Material '{mat_name}' transparency set to {alpha:.2f}")
+                        logger.debug(f"Material '{mat_name}' transparency set to {alpha:.2f}")
                 except:
                     pass  # Material doesn't exist
             
@@ -108,7 +149,7 @@ class RenderingSystem:
             
             modified_count = 0
             for geom_id in range(model.ngeom):
-                geom_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, geom_id) or ""
+                geom_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, geom_id) or "" # type: ignore
                 
                 # Check if geometry name contains room-related tags
                 if any(tag in geom_name.lower() for tag in room_geometry_tags):
@@ -118,16 +159,16 @@ class RenderingSystem:
                     modified_count += 1
             
             if modified_count > 0:
-                print(f"🎨 Modified transparency for {modified_count} geometries")
+                logger.debug(f"Modified transparency for {modified_count} geometries")
             
             # Apply changes to model
-            mujoco.mj_forward(model, mujoco.MjData(model))
+            mujoco.mj_forward(model, mujoco.MjData(model)) # type: ignore
             
         except Exception as e:
-            print(f"⚠️ Room transparency setting failed: {e}")
+            logger.warning(f"Room transparency setting failed: {e}")
     
-    def capture_screenshot(self, data: mujoco.MjData, 
-                          filename: str = None, camera_name: str = None) -> np.ndarray:
+    def capture_screenshot(self, data: mujoco.MjData,  # type: ignore
+                          filename: Optional[str] = None, camera_name: Optional[str] = None) -> np.ndarray:
         """
         Capture screenshot from specified camera.
         
@@ -150,12 +191,10 @@ class RenderingSystem:
             # Render with specified camera
             if camera_name:
                 try:
-                    cam_id = mujoco.mj_name2id(
-                        self.model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name
-                    )
+                    cam_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, camera_name) # type: ignore
                     renderer.update_scene(data, camera=cam_id)
                 except:
-                    print(f"⚠️ Camera '{camera_name}' not found, using default view")
+                    logger.warning(f"Camera '{camera_name}' not found, using default view")
                     renderer.update_scene(data)
             else:
                 renderer.update_scene(data)
@@ -169,13 +208,13 @@ class RenderingSystem:
                 # Convert RGB to BGR for OpenCV
                 screenshot_bgr = cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR)
                 cv2.imwrite(filename, screenshot_bgr)
-                print(f"📸 Screenshot saved: {filename}")
+                logger.info(f"Screenshot saved: {filename}")
             
             renderer.close()
             return screenshot
             
         except Exception as e:
-            print(f"⚠️ Screenshot capture failed: {e}")
+            logger.warning(f"Screenshot capture failed: {e}")
             return np.zeros((*self.config.main_view_size, 3), dtype=np.uint8)
     
     def start_recording(self, filename: str = "drone_flight.mp4", fps: int = 30):
@@ -187,28 +226,28 @@ class RenderingSystem:
             fps: Recording frame rate
         """
         if not self.opencv_available:
-            print("⚠️ Video recording requires OpenCV")
+            logger.warning("Video recording requires OpenCV")
             return False
         
         try:
             import cv2
             
             # Initialize video writer
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v') # type: ignore
             frame_size = tuple(reversed(self.config.main_view_size))  # (width, height)
             
             self.video_writer = cv2.VideoWriter(filename, fourcc, fps, frame_size)
             self.recording = True
             self.recording_filename = filename
             
-            print(f"🎥 Recording started: {filename} ({fps} FPS)")
+            logger.info(f"Recording started: {filename} ({fps} FPS)")
             return True
             
         except Exception as e:
-            print(f"⚠️ Recording start failed: {e}")
+            logger.warning(f"Recording start failed: {e}")
             return False
     
-    def record_frame(self, data: mujoco.MjData):
+    def record_frame(self, data: mujoco.MjData): # type: ignore
         """Add current frame to video recording."""
         if not hasattr(self, 'recording') or not self.recording:
             return
@@ -225,7 +264,7 @@ class RenderingSystem:
             self.video_writer.write(frame_bgr)
             
         except Exception as e:
-            print(f"⚠️ Frame recording failed: {e}")
+            logger.warning(f"Frame recording failed: {e}")
     
     def stop_recording(self):
         """Stop video recording."""
@@ -233,9 +272,9 @@ class RenderingSystem:
             try:
                 self.video_writer.release()
                 self.recording = False
-                print(f"🎥 Recording saved: {self.recording_filename}")
+                logger.info(f"Recording saved: {self.recording_filename}")
             except Exception as e:
-                print(f"⚠️ Recording stop failed: {e}")
+                logger.warning(f"Recording stop failed: {e}")
     
     def get_render_stats(self) -> Dict[str, Any]:
         """Get rendering performance statistics."""
@@ -251,19 +290,19 @@ class RenderingSystem:
             'estimated_fps': estimated_fps,
             'min_render_time_ms': np.min(self.render_times) * 1000,
             'max_render_time_ms': np.max(self.render_times) * 1000,
-            'pip_active': self.pip_active,
+            'pip_active': self.pip_active, # type: ignore
             'recording': getattr(self, 'recording', False)
         }
     
     def print_render_stats(self):
         """Print current rendering statistics."""
         stats = self.get_render_stats()
-        print("\n📊 Rendering Statistics:")
-        print(f"   Frames rendered: {stats['frames_rendered']}")
-        print(f"   Average render time: {stats['avg_render_time_ms']:.2f} ms")
-        print(f"   Estimated FPS: {stats['estimated_fps']:.1f}")
-        print(f"   Min/Max render time: {stats['min_render_time_ms']:.2f}/{stats['max_render_time_ms']:.2f} ms")
-        print(f"   Recording: {'🎥' if stats['recording'] else '❌'}")
+        logger.info("\n📊 Rendering Statistics:")
+        logger.info(f"   Frames rendered: {stats['frames_rendered']}")
+        logger.info(f"   Average render time: {stats['avg_render_time_ms']:.2f} ms")
+        logger.info(f"   Estimated FPS: {stats['estimated_fps']:.1f}")
+        logger.info(f"   Min/Max render time: {stats['min_render_time_ms']:.2f}/{stats['max_render_time_ms']:.2f} ms")
+        logger.info(f"   Recording: {'🎥' if stats['recording'] else '❌'}")
     
     def set_viewer_camera_mode(self, mode: str):
         """
@@ -277,17 +316,17 @@ class RenderingSystem:
         
         try:
             if mode == 'free':
-                self.viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+                self.viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FREE # type: ignore
             elif mode == 'tracking':
-                self.viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+                self.viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING # type: ignore
                 self.viewer.cam.trackbodyid = 0  # Track first body (usually drone)
             elif mode == 'fixed':
-                self.viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
+                self.viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED # type: ignore
             
-            print(f"🎥 Viewer camera mode set to: {mode}")
+            logger.info(f"Viewer camera mode set to: {mode}")
             
         except Exception as e:
-            print(f"⚠️ Camera mode change failed: {e}")
+            logger.warning(f"Camera mode change failed: {e}")
     
     def update_viewer_lighting(self, ambient: float = 0.3, diffuse: float = 0.7, 
                               specular: float = 0.1):
@@ -305,10 +344,10 @@ class RenderingSystem:
         try:
             # Update lighting (this would require access to viewer options)
             # For now, this is a placeholder for future implementation
-            print(f"💡 Lighting updated: ambient={ambient}, diffuse={diffuse}, specular={specular}")
+            logger.debug(f"Lighting updated: ambient={ambient}, diffuse={diffuse}, specular={specular}")
             
         except Exception as e:
-            print(f"⚠️ Lighting update failed: {e}")
+            logger.warning(f"Lighting update failed: {e}")
     
     def create_overlay_text(self, text: str, position: Tuple[int, int] = (10, 30),
                            font_scale: float = 0.7, color: Tuple[int, int, int] = (255, 255, 255)):
@@ -343,8 +382,8 @@ class RenderingSystem:
         
         return add_text_overlay
     
-    def create_status_overlay(self, data: mujoco.MjData) -> callable:
-        """
+    def create_status_overlay(self, data: mujoco.MjData) -> callable: # type: ignore
+        """ 
         Create status information overlay.
         
         Args:
@@ -458,7 +497,7 @@ class RenderingSystem:
             return processed
             
         except Exception as e:
-            print(f"⚠️ Visual effects failed: {e}")
+            logger.warning(f"Visual effects failed: {e}")
             return image
     
     def close(self):
@@ -468,7 +507,7 @@ class RenderingSystem:
             try:
                 self.viewer.close()
                 self.viewer = None
-                print("🔒 MuJoCo viewer closed")
+                logger.info("MuJoCo viewer closed")
             except:
                 pass
         # Stop recording if active
@@ -483,7 +522,7 @@ class RenderingSystem:
             except:
                 pass
         
-        print("🔒 Rendering system closed")
+        logger.info("Rendering system closed")
 
 
 class RecordingManager:
@@ -513,11 +552,11 @@ class RecordingManager:
             fps: Recording frame rate
         """
         if not self.rendering_system.opencv_available:
-            print("⚠️ Multi-camera recording requires OpenCV")
+            logger.warning("Multi-camera recording requires OpenCV")
             return False
         
         import cv2
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v') # type: ignore
         frame_size = tuple(reversed(self.rendering_system.config.main_view_size))
         
         for camera in cameras:
@@ -530,10 +569,10 @@ class RecordingManager:
                 'frame_count': 0
             }
         
-        print(f"🎥 Multi-camera recording started: {len(cameras)} cameras")
+        logger.info(f"Multi-camera recording started: {len(cameras)} cameras")
         return True
     
-    def record_multi_camera_frame(self, data: mujoco.MjData):
+    def record_multi_camera_frame(self, data: mujoco.MjData): # type: ignore
         """Record frame from all active cameras."""
         for camera_name, recording_info in self.active_recordings.items():
             try:
@@ -549,17 +588,17 @@ class RecordingManager:
                 recording_info['frame_count'] += 1
                 
             except Exception as e:
-                print(f"⚠️ Multi-camera recording failed for {camera_name}: {e}")
+                logger.warning(f"Multi-camera recording failed for {camera_name}: {e}")
     
     def stop_all_recordings(self):
         """Stop all active recordings."""
         for camera_name, recording_info in self.active_recordings.items():
             try:
                 recording_info['writer'].release()
-                print(f"🎥 Recording saved: {recording_info['filename']} "
+                logger.info(f"Recording saved: {recording_info['filename']} "
                       f"({recording_info['frame_count']} frames)")
             except Exception as e:
-                print(f"⚠️ Failed to stop recording for {camera_name}: {e}")
+                logger.warning(f"Failed to stop recording for {camera_name}: {e}")
         
         self.active_recordings.clear()
 
@@ -572,7 +611,7 @@ class VisualizationEffects:
     """
     
     @staticmethod
-    def create_trajectory_trail(positions: list, max_length: int = 50) -> callable:
+    def create_trajectory_trail(positions: list, max_length: int = 50) -> Callable:
         """
         Create trajectory trail visualization.
         
@@ -591,7 +630,7 @@ class VisualizationEffects:
         return add_trail_overlay
     
     @staticmethod
-    def create_velocity_vector_overlay(velocity: np.ndarray, scale: float = 10.0) -> callable:
+    def create_velocity_vector_overlay(velocity: np.ndarray, scale: float = 10.0) -> Callable:
         """
         Create velocity vector visualization.
         
