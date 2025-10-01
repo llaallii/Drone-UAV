@@ -31,10 +31,6 @@ class RenderingSystem:
         # OpenCV availability
         self.opencv_available = self._check_opencv()
         
-        # PIP display state
-        self.pip_window_name = 'Drone Camera View'
-        self.pip_active = False
-        
         # Performance tracking
         self.frame_count = 0
         self.render_times = []
@@ -42,7 +38,6 @@ class RenderingSystem:
         print(f"✅ Rendering system initialized (OpenCV: {'✅' if self.opencv_available else '❌'})")
     
     def _check_opencv(self) -> bool:
-        """Check if OpenCV is available for PIP displays."""
         try:
             import cv2
             return True
@@ -82,74 +77,6 @@ class RenderingSystem:
                 
         except Exception as e:
             print(f"⚠️ Main view rendering failed: {e}")
-    
-    def show_pip_overlay(self, drone_image: np.ndarray, window_position: Tuple[int, int] = (400, 400)):
-        """
-        Show picture-in-picture overlay of drone camera.
-        
-        Args:
-            drone_image: Image from drone's camera
-            window_position: (x, y) position for PIP window
-        """
-        if not self.opencv_available:
-            if not hasattr(self, '_opencv_warning_shown'):
-                print("⚠️ OpenCV not available for PIP display. Install: pip install opencv-python")
-                self._opencv_warning_shown = True
-            return
-        
-        try:
-            import cv2
-            
-            # Resize image for better visibility
-            pip_height, pip_width = self.config.pip_size
-            display_size = (pip_width * 3, pip_height * 3)  # 3x larger for visibility
-            
-            drone_resized = cv2.resize(drone_image, display_size)
-            
-            # Add border and title
-            border_color = (255, 255, 255)  # White border
-            bordered_image = cv2.copyMakeBorder(
-                drone_resized, 5, 25, 5, 5,  # Extra space at bottom for text
-                cv2.BORDER_CONSTANT,
-                value=border_color
-            )
-            
-            # Add title text
-            cv2.putText(
-                bordered_image, 'Drone Camera', 
-                (10, bordered_image.shape[0] - 8),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2
-            )
-            
-            # Add performance info
-            if len(self.render_times) > 0:
-                avg_render_time = np.mean(self.render_times[-10:]) * 1000  # Last 10 frames in ms
-                fps_text = f'Render: {avg_render_time:.1f}ms'
-                cv2.putText(
-                    bordered_image, fps_text,
-                    (display_size[0] - 120, bordered_image.shape[0] - 8),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 1
-                )
-            
-            # Create/update window with proper flags for resizable and movable window
-            cv2.namedWindow(self.pip_window_name, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO | cv2.WINDOW_GUI_EXPANDED)
-
-            # Only set initial position and size if window is not already created
-            if not hasattr(self, '_pip_window_initialized'):
-                cv2.resizeWindow(self.pip_window_name, display_size[0] + 10, display_size[1] + 30)
-                cv2.moveWindow(self.pip_window_name, window_position[0], window_position[1])
-                self._pip_window_initialized = True
-            
-            # Show image
-            cv2.imshow(self.pip_window_name, bordered_image)
-            cv2.waitKey(1)  # Non-blocking
-            
-            self.pip_active = True
-            
-        except Exception as e:
-            if not hasattr(self, '_pip_error_shown'):
-                print(f"⚠️ PIP display error: {e}")
-                self._pip_error_shown = True
     
     def set_room_transparency(self, model: mujoco.MjModel, alpha: float = 0.35):
         """
@@ -310,47 +237,6 @@ class RenderingSystem:
             except Exception as e:
                 print(f"⚠️ Recording stop failed: {e}")
     
-    def toggle_pip_display(self):
-        """Toggle picture-in-picture display on/off."""
-        if self.pip_active:
-            self.close_pip_display()
-        else:
-            print("🖼️ PIP display will show on next render")
-
-    def move_pip_window(self, x: int, y: int):
-        """Move PIP window to new position."""
-        if self.opencv_available and self.pip_active:
-            try:
-                import cv2
-                cv2.moveWindow(self.pip_window_name, x, y)
-                print(f"🖼️ PIP window moved to ({x}, {y})")
-            except Exception as e:
-                print(f"⚠️ Failed to move PIP window: {e}")
-
-    def resize_pip_window(self, width: int, height: int):
-        """Resize PIP window."""
-        if self.opencv_available and self.pip_active:
-            try:
-                import cv2
-                cv2.resizeWindow(self.pip_window_name, width, height)
-                print(f"🖼️ PIP window resized to {width}x{height}")
-            except Exception as e:
-                print(f"⚠️ Failed to resize PIP window: {e}")
-    
-    def close_pip_display(self):
-        """Close picture-in-picture display."""
-        if self.opencv_available and self.pip_active:
-            try:
-                import cv2
-                cv2.destroyWindow(self.pip_window_name)
-                self.pip_active = False
-                # Reset window initialization flag so it can be repositioned next time
-                if hasattr(self, '_pip_window_initialized'):
-                    delattr(self, '_pip_window_initialized')
-                print("🖼️ PIP display closed")
-            except:
-                pass
-    
     def get_render_stats(self) -> Dict[str, Any]:
         """Get rendering performance statistics."""
         if len(self.render_times) == 0:
@@ -377,7 +263,6 @@ class RenderingSystem:
         print(f"   Average render time: {stats['avg_render_time_ms']:.2f} ms")
         print(f"   Estimated FPS: {stats['estimated_fps']:.1f}")
         print(f"   Min/Max render time: {stats['min_render_time_ms']:.2f}/{stats['max_render_time_ms']:.2f} ms")
-        print(f"   PIP active: {'✅' if stats['pip_active'] else '❌'}")
         print(f"   Recording: {'🎥' if stats['recording'] else '❌'}")
     
     def set_viewer_camera_mode(self, mode: str):
@@ -586,10 +471,6 @@ class RenderingSystem:
                 print("🔒 MuJoCo viewer closed")
             except:
                 pass
-        
-        # Close PIP display
-        self.close_pip_display()
-        
         # Stop recording if active
         if hasattr(self, 'recording') and self.recording:
             self.stop_recording()

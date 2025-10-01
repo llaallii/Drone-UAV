@@ -1,0 +1,101 @@
+<mujoco model="CF2 scene">
+  <!-- Your drone model -->
+  <include file="cf2.xml"/>
+
+  <compiler inertiafromgeom="false" meshdir="assets" autolimits="true"/>
+
+  <!-- Scene stats (optional, safe defaults) -->
+  <statistic center="0 0 0.1" extent="0.2" meansize=".05"/>
+
+  <!-- VISUAL TUNING: larger zfar to avoid black screen when zooming out -->
+  <visual>
+    <quality shadowsize="4096" offsamples="8"/>
+    <map znear="0.05" zfar="300"/>
+    <headlight diffuse="0.7 0.7 0.7" ambient="0.35 0.35 0.35" specular="0.1 0.1 0.1"/>
+    <!-- Lower haze alpha so distance doesn't darken too much -->
+    <rgba haze="0.15 0.25 0.35 0.35"/>
+    <global offwidth="1280" offheight="720"/>
+  </visual>
+
+  <!-- MATERIALS & TEXTURES (self-contained) -->
+  <asset>
+    <!-- Optional sky gradient -->
+    <texture type="skybox" builtin="gradient" rgb1="0.72 0.78 0.85" rgb2="0.08 0.10 0.14" width="512" height="3072"/>
+
+    <texture name="tex-floor" type="2d" file="assets/textures/floor_wood_BaseColor.png"/>
+
+    <material name="mat-floor" texture="tex-floor" texuniform="true" texrepeat="7 5"
+              rgba="1 1 1 1" specular="0.18" shininess="0.30" reflectance="0.05"/>
+
+    <!-- Walls: subtle light plaster -->
+    <!-- Swap later to file="assets/textures/wall_plaster_BaseColor.jpg" if desired -->
+    <texture name="tex-wall" type="2d" file="assets/textures/wall_plaster_BaseColor.png"/>
+    <material name="mat-wall" texture="tex-wall" texuniform="true" texrepeat="7 5"
+              rgba="1 1 1 1" specular="0.18" shininess="0.30" reflectance="0.05"/>
+
+    <!-- Ceiling: plain off-white -->
+    <texture name="tex-ceiling" type="2d" file="assets/textures/ceiling_offwhite_BaseColor.png"/>
+    <material name="mat-ceiling" texture="tex-ceiling" texuniform="true" texrepeat="7 5"
+              rgba="1 1 1 1" specular="0.18" shininess="0.30" reflectance="0.05"/>
+
+    <!-- Sofa: fabric-like -->
+    <texture name="tex-sofa-top" type="2d" file="assets/textures/sofa_top_BaseColor.png"/>
+    <material name="mat-sofa-top" texture="tex-sofa-top" texuniform="true" texrepeat="7 5"
+              rgba="1 1 1 1" specular="0.03" shininess="0.06"/>
+
+    <texture name="tex-sofa-side" type="2d" file="assets/textures/sofa_side_BaseColor.png"/>
+    <material name="mat-sofa-side" texture="tex-sofa-side" texuniform="true" texrepeat="7 5"
+              rgba="1 1 1 1" specular="0.03" shininess="0.06"/>
+
+    <!-- Table: wood -->
+    <texture name="tex-table" type="2d" file="assets/textures/table_polished_BaseColor.png"/>
+    <material name="mat-table-polished" texture="tex-table" texuniform="true" texrepeat="2 2"
+              rgba="1 1 1 1" specular="0.10" shininess="0.25"/>
+
+    <!-- Metal legs / trims -->
+    <texture name="tex-metal" type="2d" file="assets/textures/metal_BaseColor.png"/>
+    <material name="mat-metal" texture="tex-metal" texuniform="true" texrepeat="7 5"
+              rgba="1 1 1 1" specular="0.60" shininess="0.80" reflectance="0.9"/>
+  </asset>
+
+  <worldbody>
+    <!-- Lighting -->
+    <light name="ceiling_light" pos="0 0 2.8" dir="0 0 -1" cutoff="100" exponent="2"
+           diffuse="0.9 0.85 0.8" specular="0.3 0.3 0.3" ambient="0.08 0.08 0.08" castshadow="true" />
+    <!-- Keep headlight from <visual> on as well -->
+
+    <!-- IMPORTANT: remove infinite plane to avoid black when viewing from below -->
+    <!-- <geom name="floor_infinite" size="0 0 0.05" type="plane" material="groundplane"/> -->
+
+    <!-- ==== ROOM SHELL (6m x 5m x 3m) ==== -->
+    <!-- Finite floor (solid) -->
+    <geom name="floor_box" type="box" pos="0 0 0.025" size="3 2.5 0.025" material="mat-floor" contype="1" conaffinity="1"/>
+
+    <!-- Ceiling -->
+    <geom name="ceiling" type="box" pos="0 0 3.0" size="3 2.5 0.05" material="mat-ceiling" contype="0" conaffinity="0"/>
+
+    <!-- Walls (opaque; thickness 0.1m, height 3m). Front wall has a 0.9m door gap at x=0 -->
+    <geom name="wall_back"        type="box" pos="0    2.5 1.5" size="3.00 0.05 1.5" material="mat-wall"/>
+    <geom name="wall_front_left"  type="box" pos="-1.05 -2.5 1.5" size="1.95 0.05 1.5" material="mat-wall"/>
+    <geom name="wall_front_right" type="box" pos=" 1.05 -2.5 1.5" size="1.95 0.05 1.5" material="mat-wall"/>
+    <geom name="wall_left"        type="box" pos="-3    0   1.5" size="0.05 2.5 1.5" material="mat-wall"/>
+    <geom name="wall_right"       type="box" pos=" 3    0   1.5" size="0.05 2.5 1.5" material="mat-wall"/>
+
+    <!-- Optional door slab (visual only) -->
+    <geom name="door" type="box" pos="0 -2.45 1.0" size="0.45 0.03 1.0"
+          rgba="0.75 0.75 0.78 1" contype="0" conaffinity="0"/>
+
+    <!-- ==== FURNITURE (simple, RL-friendly collisions) ==== -->
+    <!-- Table (wood top + metal legs) -->
+    <geom name="table_top"  type="box" pos="-1.2 0.5 0.75" size="0.7 0.4 0.05" material="mat-table-polished"/>
+    <geom name="table_leg1" type="cylinder" pos="-1.75 0.90 0.37" size="0.05 0.37" material="mat-metal"/>
+    <geom name="table_leg2" type="cylinder" pos="-0.65 0.90 0.37" size="0.05 0.37" material="mat-metal"/>
+    <geom name="table_leg3" type="cylinder" pos="-1.75 0.10 0.37" size="0.05 0.37" material="mat-metal"/>
+    <geom name="table_leg4" type="cylinder" pos="-0.65 0.10 0.37" size="0.05 0.37" material="mat-metal"/>
+
+    <!-- Sofa (fabric) -->
+    <geom name="sofa_base" type="box" pos="1.5 0.0 0.35" size="0.9 0.4 0.35" material="mat-sofa-top"/>
+    <geom name="sofa_back" type="box" pos="1.5 -0.35 0.75" size="0.9 0.05 0.35" material="mat-sofa-side"/>
+
+  </worldbody>
+</mujoco>

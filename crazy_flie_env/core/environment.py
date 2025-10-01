@@ -182,12 +182,6 @@ class CrazyFlieEnv(gym.Env):
         
         # Launch/update MuJoCo viewer
         self.renderer.render_main_view(self.physics.model, self.physics.data)
-        
-        
-        # Show drone camera PIP
-        self.renderer.show_pip_overlay(
-            self.camera_system.get_drone_camera_image(self.physics.data)
-        )
 
     def close(self):
         """Clean up resources."""
