@@ -16,3 +16,6 @@ logs/
 models/
 guide.pdf
 Environments/
+train_archive/
+TRAINING_SIMPLIFIED.md
+QUICK_REFERENCE.md
